@@ -1,0 +1,25 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# Serve large binary files with appropriate headers
+[[headers]]
+  for = "/*.bin"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Enable compression for all responses
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Let Netlify handle compression automatically
+    X-Content-Type-Options = "nosniff"
+
+# If you want to use pre-compressed .br files, uncomment this:
+# [[headers]]
+#   for = "/*.br"
+#   [headers.values]
+#     Content-Encoding = "br"
+#     Content-Type = "application/octet-stream"
+#     Cache-Control = "public, max-age=31536000, immutable"
