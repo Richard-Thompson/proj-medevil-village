@@ -340,16 +340,24 @@ function FirstPersonController() {
     
     direction.current.set(0, 0, 0);
 
-    if (keys.current.forward) direction.current.z -= 1;
-    if (keys.current.backward) direction.current.z += 1;
-    if (keys.current.left) direction.current.x -= 1;
-    if (keys.current.right) direction.current.x += 1;
+    // Get camera's forward and right vectors
+    const forward = new Vector3();
+    const right = new Vector3();
+    
+    camera.getWorldDirection(forward);
+    forward.y = 0; // Keep movement horizontal
+    forward.normalize();
+    
+    right.crossVectors(new Vector3(0, 1, 0), forward).normalize();
+
+    // Build movement direction from WASD
+    if (keys.current.forward) direction.current.add(forward);
+    if (keys.current.backward) direction.current.sub(forward);
+    if (keys.current.right) direction.current.add(right);
+    if (keys.current.left) direction.current.sub(right);
 
     if (direction.current.length() > 0) {
       direction.current.normalize();
-      
-      // Apply camera rotation to movement direction (only Y rotation)
-      direction.current.applyAxisAngle(new Vector3(0, 1, 0), camera.rotation.y);
       
       // Update position
       velocity.current.copy(direction.current).multiplyScalar(speed * delta);
