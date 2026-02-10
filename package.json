@@ -16,7 +16,7 @@
     "@react-three/rapier": "^2.2.0",
     "ecctrl": "^1.0.97",
     "mobx": "^6.15.0",
-    "mobx-react": "^9.2.1",
+    "mobx-react": "^7.6.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
