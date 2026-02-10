@@ -62,7 +62,7 @@ interface SceneProps {
 
 export default function Scene({ onLoaded }: SceneProps = {}) {
   const cameraProps = useMemo(() => ({ position: [0, 2, 0] as [number, number, number], fov: 75, near: 0.1, far: 5000 }), []);
-  const dprProps = useMemo(() => [1, 1.5] as [number, number], []);
+  const dprProps = useMemo(() => [1, 1] as [number, number], []);
   const bgColor = useMemo(() => ["#0b0d12"] as [string], []);
   const groupRotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
   const shadowPosition = useMemo(() => [0, -1.2, 0] as [number, number, number], []);
@@ -81,13 +81,12 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
     <Canvas
         className="h-full w-full"
         camera={cameraProps}
-        shadows
         dpr={dprProps}
+        gl={{ antialias: false, powerPreference: "high-performance" }}
       >
         <color attach="background" args={bgColor} />
-        <ambientLight intensity={.5} />
-        <directionalLight position={lightPosition} intensity={0.1} />
-        <Stats />
+        <ambientLight intensity={0.6} />
+        <directionalLight position={lightPosition} intensity={0.5} />
         <CameraPositioner />
         <CameraControlSystem />
         <PointerLockControls />
@@ -99,7 +98,6 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
           </Suspense>
         </group>
 
-        <ContactShadows position={shadowPosition} opacity={0.45} blur={2.8} scale={12} />
         <Environment preset="sunset" />
       </Canvas>
     );
