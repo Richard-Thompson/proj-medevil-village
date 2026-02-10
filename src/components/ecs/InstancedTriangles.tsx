@@ -92,13 +92,29 @@ function parseITRI(ab: ArrayBuffer): ITRIData {
   return { kind: "ITRI", count, flags, bmin, bmax, vecRange, v0_u16, x_i16, y_i16, colors, uvs };
 }
 
-// Cache for fetched data
-const dataCache = new Map<string, Promise<ITRIData>>();
+// Cache for fetched data - EXPORTED for shared usage
+export const dataCache = new Map<string, Promise<ITRIData>>();
 
 async function fetchArrayBufferMaybeBr(url: string): Promise<ArrayBuffer> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
   return await res.arrayBuffer();
+}
+
+// Export the fetch function for shared usage
+export async function fetchAndParseITRI(url: string): Promise<ITRIData> {
+  let p = dataCache.get(url);
+  if (!p) {
+    p = (async () => {
+      const ab = await fetchArrayBufferMaybeBr(url);
+      console.log("Loaded bytes:", ab.byteLength);
+      const parsed = parseITRI(ab);
+      console.log("Parsed ITRI:", parsed.count, "triangles, bmin:", parsed.bmin, "bmax:", parsed.bmax, "vecRange:", parsed.vecRange);
+      return parsed;
+    })();
+    dataCache.set(url, p);
+  }
+  return await p;
 }
 
 type InstancedTrianglesProps = Omit<ThreeElements["mesh"], "args"> & {
@@ -151,18 +167,7 @@ export function InstancedTriangles({
     (async () => {
       try {
         console.log("Fetching ITRI from:", url);
-        let p = dataCache.get(url);
-        if (!p) {
-          p = (async () => {
-            const ab = await fetchArrayBufferMaybeBr(url);
-            console.log("Loaded bytes:", ab.byteLength);
-            const parsed = parseITRI(ab);
-            console.log("Parsed ITRI:", parsed.count, "triangles, bmin:", parsed.bmin, "bmax:", parsed.bmax, "vecRange:", parsed.vecRange);
-            return parsed;
-          })();
-          dataCache.set(url, p);
-        }
-        const parsed = await p;
+        const parsed = await fetchAndParseITRI(url);
         if (!alive) return;
         console.log("Setting data with", parsed.count, "triangles");
         setData(parsed);

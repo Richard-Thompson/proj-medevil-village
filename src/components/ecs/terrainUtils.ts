@@ -164,31 +164,16 @@ function queryOctree(x: number, z: number): number[] {
   return result;
 }
 
-export function setTerrainData(data: ArrayBuffer) {
-  const dv = new DataView(data);
-  const count = dv.getUint32(8, true);
-  
-  const v0Off = dv.getUint32(20, true);
-  const xOff = dv.getUint32(24, true);
-  const yOff = dv.getUint32(28, true);
-  
-  const bmin = new Vector3(
-    dv.getFloat32(44, true),
-    dv.getFloat32(48, true),
-    dv.getFloat32(52, true)
-  );
-  const bmax = new Vector3(
-    dv.getFloat32(56, true),
-    dv.getFloat32(60, true),
-    dv.getFloat32(64, true)
-  );
-  const vecRange = dv.getFloat32(68, true);
-  
-  const v0_u16 = new Uint16Array(data, v0Off, count * 3);
-  const x_i16 = new Int16Array(data, xOff, count * 3);
-  const y_i16 = new Int16Array(data, yOff, count * 3);
-
-  terrainData = { count, v0_u16, x_i16, y_i16, bmin, bmax, vecRange };
+export function setTerrainData(data: {
+  count: number;
+  v0_u16: Uint16Array;
+  x_i16: Int16Array;
+  y_i16: Int16Array;
+  bmin: Vector3;
+  bmax: Vector3;
+  vecRange: number;
+}) {
+  terrainData = data;
 }
 
 export function buildTerrainOctree() {

@@ -2,7 +2,7 @@
 
 import ECSLoop from "@/components/ecs/systems/ECSLoop";
 import CameraControlSystem from "@/components/ecs/systems/CameraControlSystem";
-import { InstancedTriangles } from "@/components/ecs/InstancedTriangles";
+import { InstancedTriangles, fetchAndParseITRI } from "@/components/ecs/InstancedTriangles";
 import { ContactShadows, Environment, PointerLockControls, Stats } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useEffect } from "react";
@@ -16,12 +16,21 @@ function CameraPositioner() {
 
     (async () => {
       try {
-        // Fetch and parse the data
-        const res = await fetch('/data.bin.br');
-        const ab = await res.arrayBuffer();
+        // Fetch and parse the data using the shared cache
+        const data = await fetchAndParseITRI('/data.bin.br');
         
-        // Store terrain data globally
-        setTerrainData(ab);
+        if (!alive) return;
+
+        // Store terrain data globally (converting from ITRIData format)
+        setTerrainData({
+          count: data.count,
+          v0_u16: data.v0_u16,
+          x_i16: data.x_i16,
+          y_i16: data.y_i16,
+          bmin: data.bmin,
+          bmax: data.bmax,
+          vecRange: data.vecRange
+        });
 
         if (!alive) return;
 
@@ -62,7 +71,7 @@ interface SceneProps {
 
 export default function Scene({ onLoaded }: SceneProps = {}) {
   const cameraProps = useMemo(() => ({ position: [0, 2, 0] as [number, number, number], fov: 75, near: 0.1, far: 5000 }), []);
-  const dprProps = useMemo(() => [1, 1] as [number, number], []);
+  const dprProps = useMemo(() => [0.9, 0.9] as [number, number], []);
   const bgColor = useMemo(() => ["#0b0d12"] as [string], []);
   const groupRotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
   const shadowPosition = useMemo(() => [0, -1.2, 0] as [number, number, number], []);
@@ -99,6 +108,7 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
         </group>
 
         <Environment preset="sunset" />
+        <Stats className="stats" />
       </Canvas>
     );
   }
