@@ -46,7 +46,7 @@ function parseITRI(ab: ArrayBuffer): ITRIData {
   const count = dv.getUint32(8, true);
   const flags = dv.getUint32(12, true);
 
-  const headerBytes = dv.getUint32(16, true);
+  // const headerBytes = dv.getUint32(16, true);
   const v0Off = dv.getUint32(20, true);
   const xOff  = dv.getUint32(24, true);
   const yOff  = dv.getUint32(28, true);
@@ -262,9 +262,6 @@ export function InstancedTriangles({
     const instanceCount =
       maxInstances > 0 ? Math.min(data.count, maxInstances) : data.count;
 
-    // Set instanceCount FIRST before setting attributes
-    geom.instanceCount = instanceCount;
-
     // Core attributes: note normalized=true so shader receives 0..1 and -1..1 floats
     geom.setAttribute(
       "iV0",
@@ -333,13 +330,10 @@ export function InstancedTriangles({
       geom.deleteAttribute("instanceUv2");
     }
 
-    // Mark geometry as needing update
-    geom.attributes.position.needsUpdate = true;
-
     console.log("Attributes set for", instanceCount, "instances");
   }, [data, geom, maxInstances]);
 
-  console.log("InstancedTriangles render - data:", !!data, "material:", !!material, "geom.instanceCount:", geom.instanceCount);
+  console.log("InstancedTriangles render - data:", !!data, "material:", !!material);
 
   if (!material || !data) {
     return null;

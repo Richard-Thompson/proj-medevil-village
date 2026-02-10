@@ -3,15 +3,13 @@
 import ECSLoop from "@/components/ecs/systems/ECSLoop";
 import CameraControlSystem from "@/components/ecs/systems/CameraControlSystem";
 import { InstancedTriangles } from "@/components/ecs/InstancedTriangles";
-import { ECS } from "@react-ecs/core";
 import { ContactShadows, Environment, PointerLockControls, Stats } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Suspense, useMemo, useEffect, useState } from "react";
+import { Suspense, useMemo, useEffect } from "react";
 import { setTerrainData, buildTerrainOctree, findTerrainHeight } from "./terrainUtils";
 
 function CameraPositioner() {
   const { camera } = useThree();
-  const [dataLoaded, setDataLoaded] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -44,8 +42,6 @@ function CameraPositioner() {
 
         // Build octree for fast spatial queries
         buildTerrainOctree();
-
-        setDataLoaded(true);
       } catch (error) {
         console.error('Error during raycasting:', error);
         camera.position.set(0, 2, 0);
@@ -65,7 +61,6 @@ interface SceneProps {
 }
 
 export default function Scene({ onLoaded }: SceneProps = {}) {
-  const ecs = useMemo(() => new ECS(), []);
   const cameraProps = useMemo(() => ({ position: [0, 2, 0] as [number, number, number], fov: 75, near: 0.1, far: 5000 }), []);
   const dprProps = useMemo(() => [1, 1.5] as [number, number], []);
   const bgColor = useMemo(() => ["#0b0d12"] as [string], []);
@@ -84,28 +79,28 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
 
   return (
     <Canvas
-      className="h-full w-full"
-      camera={cameraProps}
-      shadows
-      dpr={dprProps}
-    >
-      <color attach="background" args={bgColor} />
-      <ambientLight intensity={.5} />
-      <directionalLight position={lightPosition} intensity={0.1} />
-      <Stats />
-      <CameraPositioner />
-      <CameraControlSystem />
-      <PointerLockControls />
+        className="h-full w-full"
+        camera={cameraProps}
+        shadows
+        dpr={dprProps}
+      >
+        <color attach="background" args={bgColor} />
+        <ambientLight intensity={.5} />
+        <directionalLight position={lightPosition} intensity={0.1} />
+        <Stats />
+        <CameraPositioner />
+        <CameraControlSystem />
+        <PointerLockControls />
 
-      <group rotation={groupRotation}>
-        <Suspense fallback={null}>
-          <ECSLoop ecs={ecs} />
-          <InstancedTriangles url="/data.bin.br" textureUrl="/baked-textures/diffuse.webp" />
-        </Suspense>
-      </group>
+        <group rotation={groupRotation}>
+          <Suspense fallback={null}>
+            <ECSLoop />
+            <InstancedTriangles url="/data.bin.br" textureUrl="/baked-textures/diffuse.webp" />
+          </Suspense>
+        </group>
 
-      <ContactShadows position={shadowPosition} opacity={0.45} blur={2.8} scale={12} />
-      <Environment preset="sunset" />
-    </Canvas>
-  );
-}
+        <ContactShadows position={shadowPosition} opacity={0.45} blur={2.8} scale={12} />
+        <Environment preset="sunset" />
+      </Canvas>
+    );
+  }

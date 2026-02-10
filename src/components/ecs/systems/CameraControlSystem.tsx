@@ -6,7 +6,7 @@ import { useEffect, useRef } from "react";
 import { Vector3 } from "three";
 
 // Import terrain data from Scene.tsx
-import { getTerrainHeightFromOctree, isOctreeReady } from "../terrainUtils";
+import { getTerrainHeightFromOctree, isOctreeReady } from "@/components/ecs/terrainUtils";
 
 export default function CameraControlSystem() {
   const { camera } = useThree();
@@ -94,8 +94,9 @@ export default function CameraControlSystem() {
       
       // Update position
       velocity.current.copy(direction.current).multiplyScalar(speed * delta);
-      camera.position.x += velocity.current.x;
-      camera.position.z += velocity.current.z;
+      const newX = camera.position.x + velocity.current.x;
+      const newZ = camera.position.z + velocity.current.z;
+      camera.position.set(newX, camera.position.y, newZ);
     }
 
     // Use octree-accelerated terrain following
@@ -112,7 +113,8 @@ export default function CameraControlSystem() {
       const lerpSpeed = 10;
       currentTerrainY.current += (targetTerrainY.current - currentTerrainY.current) * Math.min(1, delta * lerpSpeed);
       
-      camera.position.y = currentTerrainY.current + 2;
+      const newY = currentTerrainY.current + 2;
+      camera.position.set(camera.position.x, newY, camera.position.z);
     }
   });
 
