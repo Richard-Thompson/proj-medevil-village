@@ -111,6 +111,7 @@ class OctreeNode {
 }
 
 let octree: OctreeNode | null = null;
+let octreeReady = false;
 
 function buildOctree() {
   if (!terrainData) return;
@@ -139,6 +140,7 @@ function buildOctree() {
   // Subdivide recursively
   subdivideOctree(octree, 0, 6); // Max depth 6
   
+  octreeReady = true;
   console.log('Octree built!');
 }
 
@@ -186,7 +188,7 @@ function subdivideOctree(node: OctreeNode, depth: number, maxDepth: number) {
 }
 
 function queryOctree(x: number, z: number): number[] {
-  if (!octree) return [];
+  if (!octree || !octreeReady) return [];
 
   const result: number[] = [];
   const stack: OctreeNode[] = [octree];
@@ -210,29 +212,47 @@ function queryOctree(x: number, z: number): number[] {
   return result;
 }
 
-function getTerrainHeightFast(x: number, z: number): number {
-  if (!terrainData || !octree) return 2;
+function getTerrainHeightFast(x: number, z: number, lastValidHeight: number = 2): number {
+  if (!terrainData || !octree || !octreeReady) return lastValidHeight;
 
   const { v0_u16, x_i16, y_i16, bmin, bmax, vecRange } = terrainData;
   
   // Query octree for nearby triangles
   const nearbyTriangles = queryOctree(x, z);
   
+  if (nearbyTriangles.length === 0) {
+    return lastValidHeight;
+  }
+  
   const rayOrigin = new Vector3(x, 450, z);
   const rayDir = new Vector3(0, -1, 0);
   
-  let closestY = 2;
+  let closestY = null;
   let closestDist = Infinity;
+  let minTriY = Infinity;
+  let maxTriY = -Infinity;
 
   // Only test triangles from octree query
   for (const triIdx of nearbyTriangles) {
     const [v0, v1, v2] = decodeTriangle(triIdx, v0_u16, x_i16, y_i16, bmin, bmax, vecRange);
+    
+    // Track Y range of triangles
+    minTriY = Math.min(minTriY, v0.y, v1.y, v2.y);
+    maxTriY = Math.max(maxTriY, v0.y, v1.y, v2.y);
     
     const t = rayTriangleIntersect(rayOrigin, rayDir, v0, v1, v2);
     if (t !== null && t < closestDist) {
       closestDist = t;
       closestY = rayOrigin.y - t;
     }
+  }
+
+  if (closestY === null) {
+    // Use last valid height instead of jumping to default
+    if (nearbyTriangles.length > 0 && nearbyTriangles.length % 100 === 78) {
+      console.warn(`Tested ${nearbyTriangles.length} triangles at (${x.toFixed(2)}, ${z.toFixed(2)}). Triangle Y range: [${minTriY.toFixed(2)}, ${maxTriY.toFixed(2)}]. Ray at Y=450`);
+    }
+    return lastValidHeight;
   }
 
   return closestY;
@@ -279,7 +299,8 @@ function FirstPersonController() {
   const velocity = useRef(new Vector3());
   const direction = useRef(new Vector3());
   const keys = useRef({ forward: false, backward: false, left: false, right: false });
-  const cachedTerrainY = useRef<number>(2);
+  const currentTerrainY = useRef<number | null>(null);
+  const targetTerrainY = useRef<number>(2);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -366,8 +387,21 @@ function FirstPersonController() {
     }
 
     // Use octree-accelerated raycast - only tests ~100-500 triangles instead of millions
-    const terrainY = getTerrainHeightFast(camera.position.x, camera.position.z);
-    camera.position.y = terrainY + 2;
+    if (octreeReady) {
+      const lastValid = currentTerrainY.current !== null ? currentTerrainY.current : camera.position.y - 2;
+      targetTerrainY.current = getTerrainHeightFast(camera.position.x, camera.position.z, lastValid);
+      
+      // Initialize current height on first frame
+      if (currentTerrainY.current === null) {
+        currentTerrainY.current = targetTerrainY.current;
+      }
+      
+      // Smooth interpolation to prevent glitches
+      const lerpSpeed = 10;
+      currentTerrainY.current += (targetTerrainY.current - currentTerrainY.current) * Math.min(1, delta * lerpSpeed);
+      
+      camera.position.y = currentTerrainY.current + 2;
+    }
   });
 
   return null;
@@ -502,7 +536,7 @@ export default function Scene() {
       <Stats />
       <CameraPositioner />
       <FirstPersonController />
-      <PointerLockControls minPolarAngle={Math.PI / 2} maxPolarAngle={Math.PI / 2} />
+      <PointerLockControls />
 
       <group rotation={groupRotation}>
         <Suspense fallback={null}>
