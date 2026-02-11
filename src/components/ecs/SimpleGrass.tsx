@@ -327,8 +327,8 @@ export function SimpleGrass() {
           const smoothFade = fadeFactor * fadeFactor * (3.0 - 2.0 * fadeFactor); // Smoothstep
           
           if (distSq < nearDistSq && smoothFade > 0.01) { // Only render if visible enough
-            // Original position from bin file
-            position.set(x, y, z);
+            // Original position from bin file, adjusted to sit flush on mesh
+            position.set(x, y - 0.03, z); // Subtract small offset to sit flush
             // Apply smooth fade to scale for AAA-style appearance
             const fadeScale = config.nearSize * smoothFade;
             scale.set(fadeScale, fadeScale, fadeScale);
@@ -356,7 +356,7 @@ export function SimpleGrass() {
               const offsetX = Math.cos(angle) * radius;
               const offsetZ = Math.sin(angle) * radius;
               
-              position.set(x + offsetX, y, z + offsetZ);
+              position.set(x + offsetX, y - 0.03, z + offsetZ); // Adjust y to sit flush
               scale.set(fadeScale, fadeScale, fadeScale);
               matrix.compose(position, quaternion, scale);
               nearMeshRef.current.setMatrixAt(nearCount++, matrix);
@@ -427,7 +427,7 @@ export function SimpleGrass() {
           const smoothFade = fadeFactor * fadeFactor * (3.0 - 2.0 * fadeFactor);
           
           if (smoothFade > 0.01) {
-          position.set(x, y, z);
+          position.set(x, y - 0.03, z); // Adjust y to sit flush
           const fadeScale = config.midSize * smoothFade;
           scale.set(fadeScale, fadeScale, fadeScale);
           matrix.compose(position, quaternion, scale);
@@ -450,7 +450,7 @@ export function SimpleGrass() {
             const offsetX = Math.cos(angle) * radius;
             const offsetZ = Math.sin(angle) * radius;
             
-            position.set(x + offsetX, y, z + offsetZ);
+              position.set(x + offsetX, y - 0.03, z + offsetZ); // Adjust y to sit flush
             scale.set(fadeScale, fadeScale, fadeScale);
             matrix.compose(position, quaternion, scale);
             midMeshRef.current.setMatrixAt(midCount++, matrix);
