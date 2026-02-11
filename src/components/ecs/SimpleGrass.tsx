@@ -148,13 +148,13 @@ export function SimpleGrass() {
 
   const config = useControls('Simple Grass LOD', {
     enabled: true,
-    nearDistance: { value: 30, min: 10, max: 300, step: 5, label: 'Near Distance (m)' },
-    midDistance: { value: 300, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
-    nearDensity: { value: 2.35, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
-    midDensity: { value: 1.0, min: 0.01, max: 1.0, step: 0.01, label: 'Mid Density (low)' },
+    nearDistance: { value: 10, min: 10, max: 300, step: 5, label: 'Near Distance (m)' },
+    midDistance: { value: 50, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
+    nearDensity: { value: 3.00, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
+    midDensity: { value: 10.0, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
     nearSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Near Size' },
-    midSize: { value: 1.1, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
-    runtimeMultiplier: { value: 34, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
+    midSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
+    runtimeMultiplier: { value: 27, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
     spawnRadius: { value: 0.8, min: 0.1, max: 3, step: 0.1, label: 'Spawn Radius (m)' },
   });
 
@@ -241,18 +241,40 @@ export function SimpleGrass() {
 
         const dy = y - cameraPos.y;
         const distSq = xzDistSq + dy * dy;
+        const dist = Math.sqrt(distSq);
 
+        // Continuous gradient: thick close (max density) -> sparse far (min density)
+        const maxDensity = Math.max(config.nearDensity, config.midDensity);
+        const minDensity = Math.min(config.nearDensity, config.midDensity);
+        
+        const distRatio = Math.min(1.0, dist / config.midDistance);
+        const smoothRatio = distRatio * distRatio * (3.0 - 2.0 * distRatio); // Smoothstep
+        let densityTarget = maxDensity * (1.0 - smoothRatio) + minDensity * smoothRatio;
+        
+        // Fade to zero beyond midDistance
+        if (dist > config.midDistance) {
+          const fadeT = Math.min(1.0, (dist - config.midDistance) / 100.0);
+          const smoothFade = fadeT * fadeT * (3.0 - 2.0 * fadeT);
+          densityTarget = densityTarget * (1.0 - smoothFade);
+        }
+        
+        // Runtime multiplier also falls off with distance - amplifies the density gradient
+        const multiplierFactor = config.runtimeMultiplier * (1.0 - smoothRatio);
+        const effectiveMultiplier = Math.max(1, multiplierFactor);
+        
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
-
-        if (distSq < nearDistSq && hash < config.nearDensity) {
+        
+        if (distSq < nearDistSq && hash < densityTarget) {
           // Original position from bin file
           position.set(x, y, z);
           scale.set(config.nearSize, config.nearSize, config.nearSize);
           matrix.compose(position, quaternion, scale);
           nearMeshRef.current.setMatrixAt(nearCount++, matrix);
           
-          // RUNTIME DENSITY BOOST: Spawn additional grass around each bin position
-          for (let j = 1; j < config.runtimeMultiplier; j++) {
+          // RUNTIME DENSITY BOOST: Use pre-calculated multiplier
+          const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
+          
+          for (let j = 1; j < effectiveMultiplierInt; j++) {
             if (nearCount >= maxNearInstances) break;
             
             // Deterministic random offset based on position + index
@@ -298,14 +320,54 @@ export function SimpleGrass() {
 
         const dy = y - cameraPos.y;
         const distSq = xzDistSq + dy * dy;
+        const dist = Math.sqrt(distSq);
 
+        // Same continuous gradient: max density close, min density far
+        const maxDensity = Math.max(config.nearDensity, config.midDensity);
+        const minDensity = Math.min(config.nearDensity, config.midDensity);
+        
+        const distRatio = Math.min(1.0, dist / config.midDistance);
+        const smoothRatio = distRatio * distRatio * (3.0 - 2.0 * distRatio);
+        let densityTarget = maxDensity * (1.0 - smoothRatio) + minDensity * smoothRatio;
+        
+        if (dist > config.midDistance) {
+          const fadeT = Math.min(1.0, (dist - config.midDistance) / 100.0);
+          const smoothFade = fadeT * fadeT * (3.0 - 2.0 * fadeT);
+          densityTarget = densityTarget * (1.0 - smoothFade);
+        }
+        
+        // Runtime multiplier also falls off with distance in mid range
+        const multiplierFactor = config.runtimeMultiplier * (1.0 - smoothRatio);
+        const effectiveMultiplier = Math.max(1, multiplierFactor);
+        
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
 
-        if (hash < config.midDensity) {
+        if (hash < densityTarget) {
           position.set(x, y, z);
           scale.set(config.midSize, config.midSize, config.midSize);
           matrix.compose(position, quaternion, scale);
           midMeshRef.current.setMatrixAt(midCount++, matrix);
+          
+          // Spawn additional grass with gradient multiplier (same as near LOD)
+          const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
+          
+          for (let j = 1; j < effectiveMultiplierInt; j++) {
+            if (midCount >= maxMidInstances) break;
+            
+            const seed = x * 73856093 + z * 19349663 + j * 83492791;
+            const rand1 = Math.abs(Math.sin(seed * 0.001) * 43758.5453) % 1;
+            const rand2 = Math.abs(Math.sin(seed * 0.002) * 43758.5453) % 1;
+            
+            const angle = rand1 * Math.PI * 2;
+            const radius = rand2 * config.spawnRadius;
+            const offsetX = Math.cos(angle) * radius;
+            const offsetZ = Math.sin(angle) * radius;
+            
+            position.set(x + offsetX, y, z + offsetZ);
+            scale.set(config.midSize, config.midSize, config.midSize);
+            matrix.compose(position, quaternion, scale);
+            midMeshRef.current.setMatrixAt(midCount++, matrix);
+          }
         }
       }
     }
