@@ -242,8 +242,8 @@ export function InstancedTriangles({
         
         const texture = new THREE.DataTexture(textureData, texSize, texSize, THREE.RedFormat);
         texture.needsUpdate = true;
-        texture.minFilter = THREE.NearestFilter;
-        texture.magFilter = THREE.NearestFilter;
+        texture.minFilter = THREE.LinearFilter;
+        texture.magFilter = THREE.LinearFilter;
         texture.wrapS = THREE.ClampToEdgeWrapping;
         texture.wrapT = THREE.ClampToEdgeWrapping;
         
@@ -395,11 +395,12 @@ export function InstancedTriangles({
           
           float grassDensity = totalWeight > 0.0 ? totalDensity / totalWeight : 0.0;
           
-          // Debug mode: show red gradient with soft falloff
+          // Debug mode: show black gradient with soft falloff
           if (uDebugGrass > 0.5) {
-            // Smooth gradient from center to edges
-            float intensity = pow(grassDensity, 0.6); // Adjust curve for smoothness
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.0, 0.0), intensity);
+            // Boost density for more solid black while keeping soft gradient
+            float boostedDensity = min(grassDensity * 100.8, 1.0);
+            float intensity = pow(boostedDensity, 0.6); // Keep smooth gradient
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.01, 0.01, 0.01), smoothstep(0.0, 1.0, intensity));
           } else {
             // Soft black blob with very soft gradient at grass boundaries
             float distFromCamera = length(vWorldPosition - uCameraPosition);
