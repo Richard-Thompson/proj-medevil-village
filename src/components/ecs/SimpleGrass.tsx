@@ -11,7 +11,10 @@ import {
   MeshStandardMaterial,
   Quaternion,
   BufferGeometry,
-  Texture
+  Texture,
+  Frustum,
+  Matrix4 as Mat4,
+  Sphere
 } from 'three';
 import { useControls } from 'leva';
 import { useGLTF } from '@react-three/drei';
@@ -117,7 +120,9 @@ export function SimpleGrass() {
   const [totalCount, setTotalCount] = useState(0);
   const frameCount = useRef(0);
   const lastCameraPos = useRef(new Vector3());
+  const lastCameraQuat = useRef(new Quaternion());
   const updateThreshold = 2.0; // Only update when camera moves 2m
+  const rotationThreshold = 0.01; // Update when camera rotates (quaternion dot product threshold)
   const lastConfig = useRef<typeof config | null>(null);
 
   // Load grass model (texture is embedded in GLB)
@@ -210,16 +215,31 @@ export function SimpleGrass() {
       lastConfig.current.runtimeMultiplier !== config.runtimeMultiplier ||
       lastConfig.current.spawnRadius !== config.spawnRadius;
     
-    // Early exit if camera hasn't moved much AND config unchanged (40fps boost)
+    // Early exit if camera hasn't moved/rotated much AND config unchanged (40fps boost)
     const cameraDist = cameraPos.distanceTo(lastCameraPos.current);
-    if (!configChanged && cameraDist < updateThreshold && frameCount.current > 20) return;
+    const cameraRotDiff = 1.0 - Math.abs(camera.quaternion.dot(lastCameraQuat.current));
+    
+    if (!configChanged && cameraDist < updateThreshold && cameraRotDiff < rotationThreshold && frameCount.current > 20) return;
     
     lastCameraPos.current.copy(cameraPos);
+    lastCameraQuat.current.copy(camera.quaternion);
     lastConfig.current = { ...config };
+    
+    // Get camera forward direction
+    const cameraForward = new Vector3(0, 0, -1);
+    cameraForward.applyQuaternion(camera.quaternion).normalize();
+    
+    // Cull only grass 115 degrees or more behind camera
+    const cullAngleDegrees = 115;
+    const cullDotThreshold = Math.cos(cullAngleDegrees * Math.PI / 180); // cos(115°) ≈ -0.423
+    
     const matrix = new Matrix4();
     const position = new Vector3();
     const quaternion = new Quaternion();
     const scale = new Vector3();
+    const toGrass = new Vector3();
+    
+    let culledCount = 0;
     
     // No rotation - keep grass upright as exported from Blender/GLB
     quaternion.set(0, 0, 0, 1);
@@ -257,6 +277,14 @@ export function SimpleGrass() {
         const x = cellPositions[i * 3];
         const y = cellPositions[i * 3 + 1];
         const z = cellPositions[i * 3 + 2];
+        
+        // Angle-based culling: only cull grass 115+ degrees behind camera
+        toGrass.set(x - cameraPos.x, y - cameraPos.y, z - cameraPos.z).normalize();
+        const dotProduct = cameraForward.dot(toGrass);
+        if (dotProduct < cullDotThreshold) {
+          culledCount++;
+          continue;
+        }
 
         const dx = x - cameraPos.x;
         const dz = z - cameraPos.z;
@@ -350,6 +378,14 @@ export function SimpleGrass() {
         const x = cellPositions[i * 3];
         const y = cellPositions[i * 3 + 1];
         const z = cellPositions[i * 3 + 2];
+        
+        // Angle-based culling: only cull grass 115+ degrees behind camera
+        toGrass.set(x - cameraPos.x, y - cameraPos.y, z - cameraPos.z).normalize();
+        const dotProduct = cameraForward.dot(toGrass);
+        if (dotProduct < cullDotThreshold) {
+          culledCount++;
+          continue;
+        }
 
         const dx = x - cameraPos.x;
         const dz = z - cameraPos.z;
@@ -438,7 +474,7 @@ export function SimpleGrass() {
         console.log(
           `[SimpleGrass] Cam: (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}, ${cameraPos.z.toFixed(1)}) | ` +
           `Near: ${nearCount}/${maxNearInstances} (${nearFilled}%), Mid: ${midCount}/${maxMidInstances} (${midFilled}%) | ` +
-          `Checked: ${checkedCount} positions | Near cells: ${nearCells.length}, Mid cells: ${midCells.length}`
+          `Checked: ${checkedCount}, Culled: ${culledCount} | Near cells: ${nearCells.length}, Mid cells: ${midCells.length}`
         );
       }
     }); 
