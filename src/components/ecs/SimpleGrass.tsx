@@ -140,6 +140,94 @@ export function SimpleGrass() {
         mat.side = 2; // DoubleSide for instancing
         mat.alphaTest = 0.5; // Enable alpha clipping for transparency
         
+        // Add wind animation shader
+        mat.onBeforeCompile = (shader: any) => {
+          // Add wind uniforms
+          shader.uniforms.uTime = { value: 0 };
+          shader.uniforms.uWindSpeed = { value: 1.0 };
+          shader.uniforms.uWindStrength = { value: 0.3 };
+          shader.uniforms.uWindDirection = { value: new Vector3(1.0, 0.0, 0.5).normalize() };
+          shader.uniforms.uCameraPosition = { value: new Vector3() };
+          shader.uniforms.uNearDistance = { value: 50.0 };
+          shader.uniforms.uFarDistance = { value: 150.0 };
+          
+          // Store reference for updates
+          (mat as any).windUniforms = shader.uniforms;
+          
+          // Add uniforms to vertex shader
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <common>',
+            `#include <common>
+            uniform float uTime;
+            uniform float uWindSpeed;
+            uniform float uWindStrength;
+            uniform vec3 uWindDirection;
+            uniform vec3 uCameraPosition;
+            uniform float uNearDistance;
+            uniform float uFarDistance;`
+          );
+          
+          // Vertex shader: Physical wind movement for close grass
+          shader.vertexShader = shader.vertexShader.replace(
+            '#include <begin_vertex>',
+            `#include <begin_vertex>
+            
+            // Get instance world position
+            vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
+            float distToCamera = length(worldPos.xyz - uCameraPosition);
+            
+            // Only apply physical movement to near grass
+            float physicalBlend = 1.0 - smoothstep(uNearDistance, uFarDistance, distToCamera);
+            
+            if (physicalBlend > 0.01) {
+              // Wind wave using world position for variation
+              float wave = sin(uTime * uWindSpeed + worldPos.x * 0.5 + worldPos.z * 0.3) * 0.5 + 0.5;
+              float wave2 = sin(uTime * uWindSpeed * 1.3 + worldPos.x * 0.7 - worldPos.z * 0.4) * 0.5 + 0.5;
+              float windStrength = (wave * 0.6 + wave2 * 0.4) * uWindStrength;
+              
+              // Apply wind only to upper vertices (use position.y as proxy for "height")
+              float heightFactor = smoothstep(-0.5, 1.5, position.y);
+              vec3 windOffset = uWindDirection * windStrength * heightFactor * physicalBlend;
+              
+              transformed += windOffset;
+            }`
+          );
+          
+          // Add uniforms to fragment shader
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <common>',
+            `#include <common>
+            uniform float uTime;
+            uniform float uWindSpeed;
+            uniform vec3 uCameraPosition;
+            uniform float uNearDistance;
+            uniform float uFarDistance;`
+          );
+          
+          // Fragment shader: Color shift for far grass to simulate wind
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <map_fragment>',
+            `#include <map_fragment>
+            
+            float distToCamera = length(vViewPosition);
+            
+            // Color-based wind for far grass
+            float colorBlend = smoothstep(uNearDistance, uFarDistance, distToCamera);
+            
+            if (colorBlend > 0.01) {
+              // Use world position for variation (reconstruct approximate world pos)
+              vec3 worldPos = cameraPosition + normalize(vViewPosition) * length(vViewPosition);
+              
+              // Subtle color oscillation to simulate wind movement
+              float colorWave = sin(uTime * uWindSpeed * 0.8 + worldPos.x * 0.4 + worldPos.z * 0.4) * 0.5 + 0.5;
+              
+              // Slightly darken/brighten based on wave
+              float colorShift = mix(0.92, 1.08, colorWave);
+              diffuseColor.rgb *= mix(1.0, colorShift, colorBlend * 0.6);
+            }`
+          );
+        };
+        
         return { 
           grassGeometry: mesh.geometry,
           grassMaterial: mat
@@ -194,10 +282,19 @@ export function SimpleGrass() {
   }, []);
 
   // AAA LOD system: Static grass positions, dynamic LOD "mask" follows camera
-  useFrame(({ camera }) => {
+  useFrame(({ camera, clock }) => {
     if (!config.enabled || !spatialGrid || !nearMeshRef.current || !midMeshRef.current) return;
 
     frameCount.current++;
+    
+    // Update wind uniforms every frame for smooth animation
+    const windUniforms = (grassMaterial as any).windUniforms;
+    if (windUniforms) {
+      windUniforms.uTime.value = clock.elapsedTime;
+      windUniforms.uCameraPosition.value.copy(camera.position);
+      windUniforms.uNearDistance.value = 50.0;
+      windUniforms.uFarDistance.value = 150.0;
+    }
     
     // Update every 2 frames for performance (30 updates/sec)
     if (frameCount.current % 2 !== 0) return;
