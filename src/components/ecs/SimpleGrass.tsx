@@ -225,7 +225,7 @@ export function SimpleGrass() {
     lastCameraQuat.current.copy(camera.quaternion);
     lastConfig.current = { ...config };
     
-    // Get camera forward direction
+    // Get camera forward direction for angle-based culling
     const cameraForward = new Vector3(0, 0, -1);
     cameraForward.applyQuaternion(camera.quaternion).normalize();
     

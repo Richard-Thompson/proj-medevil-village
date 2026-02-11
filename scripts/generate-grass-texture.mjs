@@ -11,8 +11,8 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Configuration
-const WIDTH = 512;
-const HEIGHT = 512;
+const WIDTH = 8192;
+const HEIGHT = 8192;
 const NUM_BLADES = 2; // 2x2 grid of blade variations
 
 function drawGrassBlade(ctx, x, y, width, height, variation = 0) {
@@ -28,7 +28,7 @@ function drawGrassBlade(ctx, x, y, width, height, variation = 0) {
   // Draw blade shape
   ctx.beginPath();
   
-  const bladeWidth = width * 0.3;
+  const bladeWidth = width * 0.003;
   const curve = 5 + variation * 3;
   
   // Left edge (with slight curve)

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { ThreeElements } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
 
 function makeUnitTriangleGeometry() {
   const g = new THREE.BufferGeometry();
@@ -122,6 +123,7 @@ type InstancedTrianglesProps = Omit<ThreeElements["mesh"], "args"> & {
   textureUrl?: string;
   parent?: THREE.Object3D | null;
   maxInstances?: number;
+  grassGridUrl?: string; // Optional grass grid for accurate black gradient
 };
 
 export function InstancedTriangles({
@@ -129,12 +131,16 @@ export function InstancedTriangles({
   textureUrl = "/baked-textures/output.webp",
   parent = null,
   maxInstances = 0,
+  grassGridUrl = "/grass-grid.bin",
   ...props
 }: InstancedTrianglesProps) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const geom = useMemo(() => makeUnitTriangleGeometry(), []);
   const [data, setData] = useState<ITRIData | null>(null);
   const [albedoMap, setAlbedoMap] = useState<THREE.Texture | null>(null);
+  const [grassTexture, setGrassTexture] = useState<THREE.DataTexture | null>(null);
+  const [grassBounds, setGrassBounds] = useState<{ minX: number; maxX: number; minZ: number; maxZ: number } | null>(null);
+  const [grassTexSize, setGrassTexSize] = useState<number>(8192);
 
   useEffect(() => {
     console.log("Loading texture:", textureUrl);
@@ -180,10 +186,88 @@ export function InstancedTriangles({
     };
   }, [url]);
 
+  // Load grass grid and create density texture
+  useEffect(() => {
+    if (!grassGridUrl) return;
+    
+    let alive = true;
+    (async () => {
+      try {
+        const response = await fetch(grassGridUrl);
+        const buffer = await response.arrayBuffer();
+        const view = new DataView(buffer);
+        
+        let offset = 0;
+        const cellSize = view.getFloat32(offset, true); offset += 4;
+        const minX = view.getFloat32(offset, true); offset += 4;
+        const maxX = view.getFloat32(offset, true); offset += 4;
+        const minZ = view.getFloat32(offset, true); offset += 4;
+        const maxZ = view.getFloat32(offset, true); offset += 4;
+        const numCells = view.getUint32(offset, true); offset += 4;
+        
+        // Create texture: map world space to texture coordinates
+        const worldWidth = maxX - minX;
+        const worldDepth = maxZ - minZ;
+        // Use fixed high resolution for accurate grass detection
+        const texSize = 8192; // High resolution for accurate matching
+        const textureData = new Uint8Array(texSize * texSize);
+        
+        console.log(`[InstancedTriangles] Texture resolution: ${texSize}x${texSize} for world ${worldWidth.toFixed(1)}x${worldDepth.toFixed(1)} (${(worldWidth/texSize).toFixed(4)} units per pixel)`);
+        
+        // Read cells and mark positions with grass
+        for (let i = 0; i < numCells && offset < buffer.byteLength - 12; i++) {
+          const cellX = view.getInt32(offset, true); offset += 4;
+          const cellZ = view.getInt32(offset, true); offset += 4;
+          const numPositions = view.getUint32(offset, true); offset += 4;
+          
+          for (let j = 0; j < numPositions && offset < buffer.byteLength - 12; j++) {
+            const x = view.getFloat32(offset, true); offset += 4;
+            const y = view.getFloat32(offset, true); offset += 4;
+            const z = view.getFloat32(offset, true); offset += 4;
+            
+            // Map world position to texture coordinates
+            const u = (x - minX) / worldWidth;
+            const v = (z - minZ) / worldDepth;
+            const px = Math.floor(u * texSize);
+            const py = Math.floor(v * texSize);
+            
+            // Mark just the pixel itself (no radius expansion)
+            if (px >= 0 && px < texSize && py >= 0 && py < texSize) {
+              textureData[py * texSize + px] = 255; // Mark grass present
+            }
+          }
+        }
+        
+        if (!alive) return;
+        
+        const texture = new THREE.DataTexture(textureData, texSize, texSize, THREE.RedFormat);
+        texture.needsUpdate = true;
+        texture.minFilter = THREE.NearestFilter;
+        texture.magFilter = THREE.NearestFilter;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        
+        console.log("[InstancedTriangles] Created grass density texture:", texSize, "x", texSize);
+        console.log("[InstancedTriangles] Grass bounds:", { minX, maxX, minZ, maxZ });
+        console.log("[InstancedTriangles] Sample texture values:", textureData.slice(0, 100));
+        setGrassTexture(texture);
+        setGrassBounds({ minX, maxX, minZ, maxZ });
+        setGrassTexSize(texSize);
+      } catch (e) {
+        console.error("[InstancedTriangles] Failed to load grass grid:", e);
+      }
+    })();
+    
+    return () => {
+      alive = false;
+    };
+  }, [grassGridUrl]);
+
   // Material with onBeforeCompile to inject custom instancing logic
   const material = useMemo(() => {
     if (!data) return null;
     if (!albedoMap) return null;
+    if (!grassTexture) return null; // Wait for grass texture to be loaded
 
     const mat = new THREE.MeshStandardMaterial({
       map: albedoMap,
@@ -200,6 +284,13 @@ export function InstancedTriangles({
       shader.uniforms.uBMin = { value: data.bmin.clone() };
       shader.uniforms.uBMax = { value: data.bmax.clone() };
       shader.uniforms.uVecRange = { value: data.vecRange };
+      shader.uniforms.uCameraPosition = { value: new THREE.Vector3() };
+      shader.uniforms.uGradientRadius = { value: 0.1 };
+      shader.uniforms.uGrassTexture = { value: grassTexture };
+      shader.uniforms.uGrassMin = { value: grassBounds ? new THREE.Vector2(grassBounds.minX, grassBounds.minZ) : new THREE.Vector2(-5000, -5000) };
+      shader.uniforms.uGrassMax = { value: grassBounds ? new THREE.Vector2(grassBounds.maxX, grassBounds.maxZ) : new THREE.Vector2(5000, 5000) };
+      shader.uniforms.uGrassTexSize = { value: grassTexSize };
+      shader.uniforms.uDebugGrass = { value: 1.0 }; // 1.0 = show red debug, 0.0 = normal
 
       // Inject custom attributes at the top of vertex shader
       shader.vertexShader = shader.vertexShader.replace(
@@ -208,9 +299,12 @@ export function InstancedTriangles({
         uniform vec3 uBMin;
         uniform vec3 uBMax;
         uniform float uVecRange;
+        uniform vec3 uCameraPosition;
+        uniform float uGradientRadius;
         attribute vec3 iV0;
         attribute vec3 iX;
         attribute vec3 iY;
+        varying vec3 vWorldPosition;
         ${data.uvs ? `
         attribute vec2 instanceUv0;
         attribute vec2 instanceUv1;
@@ -229,6 +323,13 @@ export function InstancedTriangles({
         vec3 y = iY * uVecRange;
         vec3 transformed = v0 + x * w0 + y * w1;`
       );
+      
+      // Add world position calculation after worldpos
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+        vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
+      );
 
       // Replace normal calculation
       shader.vertexShader = shader.vertexShader.replace(
@@ -246,6 +347,78 @@ export function InstancedTriangles({
         );
       }
 
+      // Modify fragment shader to add varying and uniforms at the top
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 uCameraPosition;
+        uniform float uGradientRadius;
+        uniform sampler2D uGrassTexture;
+        uniform vec2 uGrassMin;
+        uniform vec2 uGrassMax;
+        uniform float uDebugGrass;
+        uniform float uGrassTexSize;
+        varying vec3 vWorldPosition;`
+      );
+      
+      // Apply black gradient ONLY where grass instances exist (from texture)
+      // OR show red debug visualization
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        // Sample grass density texture with blur for smooth edges
+        vec2 grassUV = (vWorldPosition.xz - uGrassMin) / (uGrassMax - uGrassMin);
+        
+        // Clamp UV to valid range and skip if outside bounds
+        if (grassUV.x < 0.0 || grassUV.x > 1.0 || grassUV.y < 0.0 || grassUV.y > 1.0) {
+          // Outside grass bounds, skip processing
+        } else {
+          // Sample with larger blur to expand red areas and create gradient
+          float texelSize = 1.0 / uGrassTexSize * 1.1;
+          float blurRadius = 3.0; // Larger radius for more expansion
+          float totalDensity = 0.0;
+          float totalWeight = 0.0;
+          
+          for (float y = -blurRadius; y <= blurRadius; y += 1.0) {
+            for (float x = -blurRadius; x <= blurRadius; x += 1.0) {
+              vec2 offset = vec2(x, y) * texelSize;
+              float dist = length(vec2(x, y));
+              if (dist <= blurRadius) {
+                // Gaussian-like falloff
+                float weight = exp(-dist * dist / (blurRadius * blurRadius * 0.5));
+                float texSample = texture2D(uGrassTexture, grassUV + offset).r;
+                totalDensity += texSample * weight;
+                totalWeight += weight;
+              }
+            }
+          }
+          
+          float grassDensity = totalWeight > 0.0 ? totalDensity / totalWeight : 0.0;
+          
+          // Debug mode: show red gradient with soft falloff
+          if (uDebugGrass > 0.5) {
+            // Smooth gradient from center to edges
+            float intensity = pow(grassDensity, 0.6); // Adjust curve for smoothness
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(1.0, 0.0, 0.0), intensity);
+          } else {
+            // Soft black blob with very soft gradient at grass boundaries
+            float distFromCamera = length(vWorldPosition - uCameraPosition);
+            
+            // Very soft radial gradient from camera
+            float radialFade = pow(distFromCamera / uGradientRadius, 2.5);
+            radialFade = clamp(radialFade, 0.0, 1.0);
+            
+            // Very soft grass boundary fade
+            float grassFade = pow(grassDensity, 0.3);
+            
+            // Combine both fades for soft blob effect
+            float darknessFactor = grassFade * (1.0 - radialFade);
+            
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0), darknessFactor);
+          }
+        }`
+      );
+
       console.log("Modified vertex shader (first 500 chars):", shader.vertexShader.substring(0, 500));
 
       mat.userData.shader = shader;
@@ -253,11 +426,25 @@ export function InstancedTriangles({
 
     mat.needsUpdate = true;
     return mat;
-  }, [albedoMap, data]);
+  }, [albedoMap, data, grassTexture, grassBounds, grassTexSize]);
 
   useEffect(() => {
     if (!material) return;
-    return () => material.dispose();
+    
+    // Update camera position uniform every frame
+    const updateCameraPosition = (camera: THREE.Camera) => {
+      const shader = material.userData.shader;
+      if (shader && shader.uniforms.uCameraPosition) {
+        shader.uniforms.uCameraPosition.value.copy(camera.position);
+      }
+    };
+    
+    // Store the update function for cleanup
+    material.userData.updateCameraPosition = updateCameraPosition;
+    
+    return () => {
+      material.dispose();
+    };
   }, [material]);
 
   // Bind attributes (still no per-instance matrix loop)
@@ -337,6 +524,16 @@ export function InstancedTriangles({
 
     console.log("Attributes set for", instanceCount, "instances");
   }, [data, geom, maxInstances]);
+
+  // Update camera position uniform every frame
+  useFrame(({ camera }) => {
+    if (material && material.userData.shader) {
+      const shader = material.userData.shader;
+      if (shader.uniforms.uCameraPosition) {
+        shader.uniforms.uCameraPosition.value.copy(camera.position);
+      }
+    }
+  });
 
   console.log("InstancedTriangles render - data:", !!data, "material:", !!material);
 
