@@ -15,13 +15,17 @@ import bpy
 import struct
 import os
 from collections import defaultdict
+from mathutils import Vector
 
 # ===== CONFIGURATION =====
 CONFIG = {
     'object_name': 'Grass land',
+    'terrain_object_name': 'Landscape',  # Terrain mesh to snap grass to
     'output_file': 'C:/Users/Rick/Desktop/proj-medevil-village/code/public/grass-grid.bin',
     'cell_size': 50.0,  # 50m cells (good for 100m-300m LOD ranges)
     'decimation_factor': 20,  # Keep 1 in every N positions (20 = 5% density = ~2M positions)
+    'raycast_distance': 10.0,  # Max distance to raycast down to find terrain
+    'enable_raycast': True,  # Set to False to disable raycasting (use original Y values)
 }
 
 def export_grass_positions():
@@ -33,11 +37,26 @@ def export_grass_positions():
         print(f"Available objects: {[o.name for o in bpy.data.objects]}")
         return
     
+    # Get terrain object for raycasting
+    terrain_obj = None
+    if CONFIG['enable_raycast']:
+        terrain_obj = bpy.data.objects.get(CONFIG['terrain_object_name'])
+        if not terrain_obj:
+            print(f"WARNING: Terrain object '{CONFIG['terrain_object_name']}' not found!")
+            print(f"Raycasting disabled - using original Y positions")
+            CONFIG['enable_raycast'] = False
+        else:
+            print(f"Terrain object: {CONFIG['terrain_object_name']} (Type: {terrain_obj.type})")
+            # Get evaluated terrain for raycasting
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            terrain_obj = terrain_obj.evaluated_get(depsgraph)
+    
     print(f"\n{'='*60}")
     print(f"SPATIAL GRID GRASS EXPORT")
     print(f"{'='*60}")
     print(f"Object: {CONFIG['object_name']} (Type: {obj.type})")
     print(f"Cell size: {CONFIG['cell_size']}m")
+    print(f"Raycast to terrain: {CONFIG['enable_raycast']}")
     print(f"Output: {CONFIG['output_file']}")
     print(f"{'='*60}\n")
     
@@ -48,6 +67,7 @@ def export_grass_positions():
     print(f"Evaluated object data type: {type(obj_eval.data)}")
     
     positions = []
+    raycast_failures = 0
     
     # Extract positions from point cloud
     if hasattr(obj_eval.data, 'points'):
@@ -64,10 +84,32 @@ def export_grass_positions():
             y = world_pos.z   # Blender Z -> Three.js Y
             z = -world_pos.y  # Blender Y -> Three.js -Z
             
+            # Raycast down to terrain surface if enabled
+            if CONFIG['enable_raycast'] and terrain_obj:
+                # Create ray from point going down
+                origin = world_pos.copy()
+                direction = Vector((0, 0, -1))  # Down in Blender coords
+                
+                # Raycast
+                result, location, normal, index = terrain_obj.ray_cast(
+                    origin, 
+                    direction, 
+                    distance=CONFIG['raycast_distance']
+                )
+                
+                if result:
+                    # Use raycasted Y position
+                    y = location.z  # Blender Z -> Three.js Y
+                else:
+                    # Raycast failed, keep original position
+                    raycast_failures += 1
+            
             positions.append((x, y, z))
             
             if (i + 1) % 100000 == 0:
                 print(f"  Processed {i + 1} points...")
+                if CONFIG['enable_raycast']:
+                    print(f"    Raycast failures so far: {raycast_failures}")
     
     # Fallback: mesh vertices
     elif hasattr(obj_eval.data, 'vertices'):
@@ -82,10 +124,28 @@ def export_grass_positions():
             y = world_pos.z
             z = -world_pos.y
             
+            # Raycast down to terrain surface if enabled
+            if CONFIG['enable_raycast'] and terrain_obj:
+                origin = world_pos.copy()
+                direction = Vector((0, 0, -1))
+                
+                result, location, normal, index = terrain_obj.ray_cast(
+                    origin, 
+                    direction, 
+                    distance=CONFIG['raycast_distance']
+                )
+                
+                if result:
+                    y = location.z
+                else:
+                    raycast_failures += 1
+            
             positions.append((x, y, z))
             
             if (i + 1) % 100000 == 0:
                 print(f"  Processed {i + 1} vertices...")
+                if CONFIG['enable_raycast']:
+                    print(f"    Raycast failures so far: {raycast_failures}")
     
     else:
         print(f"ERROR: Cannot extract positions from '{obj.name}'")
@@ -96,6 +156,10 @@ def export_grass_positions():
         return
     
     print(f"\nTotal positions: {len(positions)}")
+    if CONFIG['enable_raycast']:
+        success_rate = ((len(positions) - raycast_failures) / len(positions)) * 100
+        print(f"Raycast failures: {raycast_failures} ({100 - success_rate:.1f}%)")
+        print(f"Successfully snapped to terrain: {len(positions) - raycast_failures} ({success_rate:.1f}%)")
     
     # Decimate positions (keep every Nth position)
     if CONFIG['decimation_factor'] > 1:

@@ -8,9 +8,13 @@ import {
   Vector3,
   BoxGeometry,
   MeshBasicMaterial,
-  Quaternion
+  MeshStandardMaterial,
+  Quaternion,
+  BufferGeometry,
+  Texture
 } from 'three';
 import { useControls } from 'leva';
+import { useGLTF } from '@react-three/drei';
 
 // Pre-built spatial grid loaded from binary
 interface SpatialGrid {
@@ -113,23 +117,50 @@ export function SimpleGrass() {
   const [totalCount, setTotalCount] = useState(0);
   const frameCount = useRef(0);
 
+  // Load grass model (texture is embedded in GLB)
+  const grassModel = useGLTF('/models/good-grass-1.1.glb');
+  
+  // Get grass geometry and material from model
+  const { grassGeometry, grassMaterial } = useMemo(() => {
+    if (grassModel && grassModel.scene) {
+      const mesh = grassModel.scene.children[0] as any;
+      if (mesh && mesh.geometry && mesh.material) {
+        console.log('[SimpleGrass] Loaded grass model');
+        
+        // Clone material to avoid modifying original
+        const mat = mesh.material.clone();
+        mat.side = 2; // DoubleSide for instancing
+        mat.alphaTest = 0.5; // Enable alpha clipping for transparency
+        
+        return { 
+          grassGeometry: mesh.geometry,
+          grassMaterial: mat
+        };
+      }
+    }
+    // Fallback
+    console.warn('[SimpleGrass] Model not loaded, using fallback');
+    return {
+      grassGeometry: new BoxGeometry(0.5, 2, 0.1),
+      grassMaterial: new MeshStandardMaterial({ color: 0x4a7c4a, side: 2 })
+    };
+  }, [grassModel]);
+
   const config = useControls('Simple Grass LOD', {
     enabled: true,
-    yOffset: { value: 0, min: -50, max: 50, step: 0.5, label: 'Y Offset' },
     nearDistance: { value: 30, min: 10, max: 300, step: 5, label: 'Near Distance (m)' },
     midDistance: { value: 300, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
-    nearDensity: { value: 6.0, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
-    midDensity: { value: 0.3, min: 0.01, max: 1.0, step: 0.01, label: 'Mid Density (low)' },
-    nearSize: { value: 2.0, min: 0.1, max: 10, step: 0.1, label: 'Near Size' },
-    midSize: { value: 3.0, min: 0.1, max: 10, step: 0.1, label: 'Mid Size' },    runtimeMultiplier: { value: 4, min: 1, max: 20, step: 1, label: 'Runtime Grass Multiplier' },
-    spawnRadius: { value: 1.5, min: 0.1, max: 5, step: 0.1, label: 'Spawn Radius (m)' },  });
+    nearDensity: { value: 2.35, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
+    midDensity: { value: 1.0, min: 0.01, max: 1.0, step: 0.01, label: 'Mid Density (low)' },
+    nearSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Near Size' },
+    midSize: { value: 1.1, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
+    runtimeMultiplier: { value: 34, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
+    spawnRadius: { value: 0.8, min: 0.1, max: 3, step: 0.1, label: 'Spawn Radius (m)' },
+  });
 
-  // Create geometries and materials once
-  const nearGeometry = useMemo(() => new BoxGeometry(0.5, 0.5, 0.5), []);
-  const midGeometry = useMemo(() => new BoxGeometry(1, 1, 1), []);
-  
-  const nearMaterial = useMemo(() => new MeshBasicMaterial({ color: 'green' }), []);
-  const midMaterial = useMemo(() => new MeshBasicMaterial({ color: 'yellow' }), []);
+  // Use original material from GLB for both LODs
+  const nearMaterial = grassMaterial;
+  const midMaterial = grassMaterial;
 
   // Load pre-built spatial grid (or fallback to old format)
   useEffect(() => {
@@ -169,8 +200,8 @@ export function SimpleGrass() {
     const quaternion = new Quaternion();
     const scale = new Vector3();
     
-    // Apply group rotation of -Math.PI/2 around X-axis
-    quaternion.setFromAxisAngle(new Vector3(1, 0, 0), -Math.PI / 2);
+    // No rotation - keep grass upright as exported from Blender/GLB
+    quaternion.set(0, 0, 0, 1);
     
     // LOD "mask" distances that follow camera
     const nearDistSq = config.nearDistance * config.nearDistance;
@@ -199,7 +230,7 @@ export function SimpleGrass() {
         checkedCount++;
         
         const x = cellPositions[i * 3];
-        const y = cellPositions[i * 3 + 1] + config.yOffset;
+        const y = cellPositions[i * 3 + 1];
         const z = cellPositions[i * 3 + 2];
 
         const dx = x - cameraPos.x;
@@ -235,10 +266,9 @@ export function SimpleGrass() {
             const radius = rand2 * config.spawnRadius;
             const offsetX = Math.cos(angle) * radius;
             const offsetZ = Math.sin(angle) * radius;
-            const offsetY = (rand3 - 0.5) * 0.5; // Small y variation
             
-            position.set(x + offsetX, y + offsetY, z + offsetZ);
-            scale.set(config.nearSize * (0.8 + rand3 * 0.4), config.nearSize * (0.8 + rand3 * 0.4), config.nearSize * (0.8 + rand3 * 0.4));
+            position.set(x + offsetX, y, z + offsetZ);
+            scale.set(config.nearSize, config.nearSize, config.nearSize);
             matrix.compose(position, quaternion, scale);
             nearMeshRef.current.setMatrixAt(nearCount++, matrix);
           }
@@ -256,7 +286,7 @@ export function SimpleGrass() {
         checkedCount++;
         
         const x = cellPositions[i * 3];
-        const y = cellPositions[i * 3 + 1] + config.yOffset;
+        const y = cellPositions[i * 3 + 1];
         const z = cellPositions[i * 3 + 2];
 
         const dx = x - cameraPos.x;
@@ -309,21 +339,21 @@ export function SimpleGrass() {
 
   return (
     <>
-      {/* Near LOD (0-15m): THICK green cubes */}
+      {/* Near LOD: Dense grass blades */}
       <instancedMesh 
         ref={nearMeshRef} 
-        args={[nearGeometry, nearMaterial, maxNearInstances]} 
+        args={[grassGeometry, nearMaterial, maxNearInstances]} 
         frustumCulled={false}
       />
       
-      {/* Mid LOD (15-40m): SPARSE yellow cubes */}
+      {/* Mid LOD: Sparse grass blades */}
       <instancedMesh 
         ref={midMeshRef} 
-        args={[midGeometry, midMaterial, maxMidInstances]} 
+        args={[grassGeometry, midMaterial, maxMidInstances]} 
         frustumCulled={false}
       />
       
-      {/* Far LOD (40m+): NO GEOMETRY - handled by terrain material shader with:
+      {/* Far LOD (300m+): NO GEOMETRY - handled by terrain material shader with:
           - Coverage map (albedo tint, roughness variation)
           - Fur normal trick (anisotropic normal for vertical structure)
           - Horizon sparkle (view-dependent spec at grazing angles)
