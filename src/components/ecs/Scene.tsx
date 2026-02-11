@@ -3,10 +3,11 @@
 import ECSLoop from "@/components/ecs/systems/ECSLoop";
 import CameraControlSystem from "@/components/ecs/systems/CameraControlSystem";
 import { InstancedTriangles, fetchAndParseITRI } from "@/components/ecs/InstancedTriangles";
-import { ContactShadows, Environment, PointerLockControls, Stats } from "@react-three/drei";
+import { ContactShadows, Environment, OrbitControls, PointerLockControls, Stats } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useEffect } from "react";
 import { setTerrainData, buildTerrainOctree, findTerrainHeight } from "./terrainUtils";
+import { SimpleGrass } from "./SimpleGrass";
 
 function CameraPositioner() {
   const { camera } = useThree();
@@ -99,13 +100,14 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
         <CameraPositioner />
         <CameraControlSystem />
         <PointerLockControls />
-
-        <group rotation={groupRotation}>
+        {/* <OrbitControls /> */}
           <Suspense fallback={null}>
             <ECSLoop />
+        <group rotation={groupRotation}>
             <InstancedTriangles url="/data.bin.br" textureUrl="/baked-textures/diffuse.webp" />
-          </Suspense>
         </group>
+            <SimpleGrass />
+          </Suspense>
 
         <Environment preset="sunset" />
         <Stats className="stats" />

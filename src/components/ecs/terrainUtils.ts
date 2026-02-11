@@ -176,6 +176,10 @@ export function setTerrainData(data: {
   terrainData = data;
 }
 
+export function getTerrainData() {
+  return terrainData;
+}
+
 export function buildTerrainOctree() {
   if (!terrainData) return;
 
