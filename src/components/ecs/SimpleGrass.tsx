@@ -151,13 +151,13 @@ export function SimpleGrass() {
 
   const config = useControls('Simple Grass LOD', {
     enabled: true,
-    nearDistance: { value: 10, min: 10, max: 300, step: 5, label: 'Near Distance (m)' },
+    nearDistance: { value: 243, min: 0, max: 300, step: 5, label: 'Near Distance (m)' },
     midDistance: { value: 50, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
     nearDensity: { value: 3.00, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
     midDensity: { value: 10.0, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
     nearSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Near Size' },
     midSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
-    runtimeMultiplier: { value: 27, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
+    runtimeMultiplier: { value: 1, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
     spawnRadius: { value: 0.8, min: 0.1, max: 3, step: 0.1, label: 'Spawn Radius (m)' },
   });
 
@@ -289,38 +289,50 @@ export function SimpleGrass() {
         
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
         
-        if (distSq < nearDistSq && hash < densityTarget) {
-          // Original position from bin file
-          position.set(x, y, z);
-          scale.set(config.nearSize, config.nearSize, config.nearSize);
-          matrix.compose(position, quaternion, scale);
-          nearMeshRef.current.setMatrixAt(nearCount++, matrix);
+        // AAA smooth fade: use hash margin to determine fade amount
+        const fadeMargin = 0.1; // 10% margin for smooth fade
+        const hashDiff = densityTarget - hash;
+        
+        if (hashDiff > 0) { // Blade is visible
+          // Calculate fade factor: 0 at threshold, 1.0 when well within margin
+          const fadeFactor = Math.min(1.0, hashDiff / fadeMargin);
+          const smoothFade = fadeFactor * fadeFactor * (3.0 - 2.0 * fadeFactor); // Smoothstep
           
-          // RUNTIME DENSITY BOOST: Use pre-calculated multiplier
-          // Limit spawns when near capacity
-          const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
-          const remainingSlots = maxNearInstances - nearCount;
-          const spawnCount = Math.min(effectiveMultiplierInt - 1, remainingSlots);
-          
-          for (let j = 1; j <= spawnCount; j++) {
-            if (nearCount >= maxNearInstances) break;
-            
-            // Deterministic random offset based on position + index
-            const seed = x * 73856093 + z * 19349663 + j * 83492791;
-            const rand1 = Math.abs(Math.sin(seed * 0.001) * 43758.5453) % 1;
-            const rand2 = Math.abs(Math.sin(seed * 0.002) * 43758.5453) % 1;
-            const rand3 = Math.abs(Math.sin(seed * 0.003) * 43758.5453) % 1;
-            
-            // Random offset within spawn radius
-            const angle = rand1 * Math.PI * 2;
-            const radius = rand2 * config.spawnRadius;
-            const offsetX = Math.cos(angle) * radius;
-            const offsetZ = Math.sin(angle) * radius;
-            
-            position.set(x + offsetX, y, z + offsetZ);
-            scale.set(config.nearSize, config.nearSize, config.nearSize);
+          if (distSq < nearDistSq && smoothFade > 0.01) { // Only render if visible enough
+            // Original position from bin file
+            position.set(x, y, z);
+            // Apply smooth fade to scale for AAA-style appearance
+            const fadeScale = config.nearSize * smoothFade;
+            scale.set(fadeScale, fadeScale, fadeScale);
             matrix.compose(position, quaternion, scale);
             nearMeshRef.current.setMatrixAt(nearCount++, matrix);
+            
+            // RUNTIME DENSITY BOOST: Use pre-calculated multiplier
+            // Limit spawns when near capacity
+            const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
+            const remainingSlots = maxNearInstances - nearCount;
+            const spawnCount = Math.min(effectiveMultiplierInt - 1, remainingSlots);
+            
+            for (let j = 1; j <= spawnCount; j++) {
+              if (nearCount >= maxNearInstances) break;
+              
+              // Deterministic random offset based on position + index
+              const seed = x * 73856093 + z * 19349663 + j * 83492791;
+              const rand1 = Math.abs(Math.sin(seed * 0.001) * 43758.5453) % 1;
+              const rand2 = Math.abs(Math.sin(seed * 0.002) * 43758.5453) % 1;
+              const rand3 = Math.abs(Math.sin(seed * 0.003) * 43758.5453) % 1;
+              
+              // Random offset within spawn radius
+              const angle = rand1 * Math.PI * 2;
+              const radius = rand2 * config.spawnRadius;
+              const offsetX = Math.cos(angle) * radius;
+              const offsetZ = Math.sin(angle) * radius;
+              
+              position.set(x + offsetX, y, z + offsetZ);
+              scale.set(fadeScale, fadeScale, fadeScale);
+              matrix.compose(position, quaternion, scale);
+              nearMeshRef.current.setMatrixAt(nearCount++, matrix);
+            }
           }
         }
       }
@@ -370,9 +382,18 @@ export function SimpleGrass() {
         
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
 
-        if (hash < densityTarget) {
+        // AAA smooth fade
+        const fadeMargin = 0.15; // Slightly larger margin for mid LOD
+        const hashDiff = densityTarget - hash;
+        
+        if (hashDiff > 0) {
+          const fadeFactor = Math.min(1.0, hashDiff / fadeMargin);
+          const smoothFade = fadeFactor * fadeFactor * (3.0 - 2.0 * fadeFactor);
+          
+          if (smoothFade > 0.01) {
           position.set(x, y, z);
-          scale.set(config.midSize, config.midSize, config.midSize);
+          const fadeScale = config.midSize * smoothFade;
+          scale.set(fadeScale, fadeScale, fadeScale);
           matrix.compose(position, quaternion, scale);
           midMeshRef.current.setMatrixAt(midCount++, matrix);
           
@@ -394,32 +415,33 @@ export function SimpleGrass() {
             const offsetZ = Math.sin(angle) * radius;
             
             position.set(x + offsetX, y, z + offsetZ);
-            scale.set(config.midSize, config.midSize, config.midSize);
+            scale.set(fadeScale, fadeScale, fadeScale);
             matrix.compose(position, quaternion, scale);
             midMeshRef.current.setMatrixAt(midCount++, matrix);
+            }
           }
         }
       }
-    }
-
-    // Update instance counts
-    nearMeshRef.current.count = nearCount;
-    nearMeshRef.current.instanceMatrix.needsUpdate = true;
-    
-    midMeshRef.current.count = midCount;
-    midMeshRef.current.instanceMatrix.needsUpdate = true;
-
-    // Debug log
-    if (frameCount.current <= 6 || frameCount.current % 120 === 0) {
-      const nearFilled = ((nearCount / maxNearInstances) * 100).toFixed(1);
-      const midFilled = ((midCount / maxMidInstances) * 100).toFixed(1);
-      console.log(
-        `[SimpleGrass] Cam: (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}, ${cameraPos.z.toFixed(1)}) | ` +
-        `Near: ${nearCount}/${maxNearInstances} (${nearFilled}%), Mid: ${midCount}/${maxMidInstances} (${midFilled}%) | ` +
-        `Checked: ${checkedCount} positions | Near cells: ${nearCells.length}, Mid cells: ${midCells.length}`
-      );
-    }
-  });
+      }
+  
+      // Update instance counts
+      nearMeshRef.current.count = nearCount;
+      nearMeshRef.current.instanceMatrix.needsUpdate = true;
+      
+      midMeshRef.current.count = midCount;
+      midMeshRef.current.instanceMatrix.needsUpdate = true;
+  
+      // Debug log
+      if (frameCount.current <= 6 || frameCount.current % 120 === 0) {
+        const nearFilled = ((nearCount / maxNearInstances) * 100).toFixed(1);
+        const midFilled = ((midCount / maxMidInstances) * 100).toFixed(1);
+        console.log(
+          `[SimpleGrass] Cam: (${cameraPos.x.toFixed(1)}, ${cameraPos.y.toFixed(1)}, ${cameraPos.z.toFixed(1)}) | ` +
+          `Near: ${nearCount}/${maxNearInstances} (${nearFilled}%), Mid: ${midCount}/${maxMidInstances} (${midFilled}%) | ` +
+          `Checked: ${checkedCount} positions | Near cells: ${nearCells.length}, Mid cells: ${midCells.length}`
+        );
+      }
+    }); 
 
   if (!spatialGrid || totalCount === 0) {
     return null;
