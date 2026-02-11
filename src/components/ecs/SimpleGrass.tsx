@@ -116,6 +116,9 @@ export function SimpleGrass() {
   const [spatialGrid, setSpatialGrid] = useState<SpatialGrid | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const frameCount = useRef(0);
+  const lastCameraPos = useRef(new Vector3());
+  const updateThreshold = 2.0; // Only update when camera moves 2m
+  const lastConfig = useRef<typeof config | null>(null);
 
   // Load grass model (texture is embedded in GLB)
   const grassModel = useGLTF('/models/good-grass-1.1.glb');
@@ -195,6 +198,24 @@ export function SimpleGrass() {
     if (frameCount.current % 2 !== 0) return;
 
     const cameraPos = camera.position;
+    
+    // Check if any config values changed
+    const configChanged = !lastConfig.current || 
+      lastConfig.current.nearDistance !== config.nearDistance ||
+      lastConfig.current.midDistance !== config.midDistance ||
+      lastConfig.current.nearDensity !== config.nearDensity ||
+      lastConfig.current.midDensity !== config.midDensity ||
+      lastConfig.current.nearSize !== config.nearSize ||
+      lastConfig.current.midSize !== config.midSize ||
+      lastConfig.current.runtimeMultiplier !== config.runtimeMultiplier ||
+      lastConfig.current.spawnRadius !== config.spawnRadius;
+    
+    // Early exit if camera hasn't moved much AND config unchanged (40fps boost)
+    const cameraDist = cameraPos.distanceTo(lastCameraPos.current);
+    if (!configChanged && cameraDist < updateThreshold && frameCount.current > 20) return;
+    
+    lastCameraPos.current.copy(cameraPos);
+    lastConfig.current = { ...config };
     const matrix = new Matrix4();
     const position = new Vector3();
     const quaternion = new Quaternion();
@@ -221,11 +242,15 @@ export function SimpleGrass() {
 
     let checkedCount = 0;
 
-    // Check ALL positions in near cells (high density)
+    // Adaptive stride for near LOD - check fewer positions when at high capacity
+    const nearCapacityRatio = nearCount / maxNearInstances;
+    const nearStride = nearCapacityRatio > 0.8 ? 3 : (nearCapacityRatio > 0.5 ? 2 : 1);
+
+    // Check positions in near cells
     for (const cellPositions of nearCells) {
       const numPositions = cellPositions.length / 3;
       
-      for (let i = 0; i < numPositions; i++) {
+      for (let i = 0; i < numPositions; i += nearStride) {
         if (nearCount >= maxNearInstances) break;
         checkedCount++;
         
@@ -272,9 +297,12 @@ export function SimpleGrass() {
           nearMeshRef.current.setMatrixAt(nearCount++, matrix);
           
           // RUNTIME DENSITY BOOST: Use pre-calculated multiplier
+          // Limit spawns when near capacity
           const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
+          const remainingSlots = maxNearInstances - nearCount;
+          const spawnCount = Math.min(effectiveMultiplierInt - 1, remainingSlots);
           
-          for (let j = 1; j < effectiveMultiplierInt; j++) {
+          for (let j = 1; j <= spawnCount; j++) {
             if (nearCount >= maxNearInstances) break;
             
             // Deterministic random offset based on position + index
@@ -298,8 +326,8 @@ export function SimpleGrass() {
       }
     }
 
-    // Sample SPARSELY in mid cells (low density) - only check every 10th position
-    const midStride = 10;
+    // Sample SPARSELY in mid cells (low density) - only check every 15th position
+    const midStride = 15;
     for (const cellPositions of midCells) {
       const numPositions = cellPositions.length / 3;
       
@@ -350,8 +378,10 @@ export function SimpleGrass() {
           
           // Spawn additional grass with gradient multiplier (same as near LOD)
           const effectiveMultiplierInt = Math.floor(effectiveMultiplier);
+          const remainingSlots = maxMidInstances - midCount;
+          const spawnCount = Math.min(effectiveMultiplierInt - 1, remainingSlots);
           
-          for (let j = 1; j < effectiveMultiplierInt; j++) {
+          for (let j = 1; j <= spawnCount; j++) {
             if (midCount >= maxMidInstances) break;
             
             const seed = x * 73856093 + z * 19349663 + j * 83492791;
