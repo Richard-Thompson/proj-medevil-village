@@ -252,10 +252,10 @@ export function SimpleGrass() {
 
   const config = useControls('Simple Grass LOD', {
     enabled: true,
-    nearDistance: { value: 243, min: 0, max: 300, step: 5, label: 'Near Distance (m)' },
-    midDistance: { value: 600, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
+    nearDistance: { value: 43, min: 0, max: 300, step: 5, label: 'Near Distance (m)' },
+    midDistance: { value: 220, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
     nearDensity: { value: .400, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
-    midDensity: { value: 1.0, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
+    midDensity: { value: 1.05, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
     nearSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Near Size' },
     midSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
     runtimeMultiplier: { value: 1, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },

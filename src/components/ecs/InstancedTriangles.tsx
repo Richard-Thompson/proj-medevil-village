@@ -290,7 +290,7 @@ export function InstancedTriangles({
         const worldWidth = maxX - minX;
         const worldDepth = maxZ - minZ;
         // Use fixed high resolution for accurate grass detection
-        const texSize = 8192; // High resolution for accurate matching
+        const texSize = 4096; // Reduced resolution for performance
         const textureData = new Uint8Array(texSize * texSize);
         
         console.log(`[InstancedTriangles] Texture resolution: ${texSize}x${texSize} for world ${worldWidth.toFixed(1)}x${worldDepth.toFixed(1)} (${(worldWidth/texSize).toFixed(4)} units per pixel)`);
@@ -323,6 +323,7 @@ export function InstancedTriangles({
         
         const texture = new THREE.DataTexture(textureData, texSize, texSize, THREE.RedFormat);
         texture.needsUpdate = true;
+        texture.generateMipmaps = false;
         texture.minFilter = THREE.LinearFilter;
         texture.magFilter = THREE.LinearFilter;
         texture.wrapS = THREE.ClampToEdgeWrapping;

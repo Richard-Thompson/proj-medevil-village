@@ -3,7 +3,7 @@
 import ECSLoop from "@/components/ecs/systems/ECSLoop";
 import CameraControlSystem from "@/components/ecs/systems/CameraControlSystem";
 import { InstancedTriangles, fetchAndParseITRI } from "@/components/ecs/InstancedTriangles";
-import { ContactShadows, Environment, OrbitControls, PointerLockControls, Stats } from "@react-three/drei";
+import { Environment, PointerLockControls, Stats } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Suspense, useMemo, useEffect } from "react";
 import { setTerrainData, buildTerrainOctree, findTerrainHeight } from "./terrainUtils";
@@ -72,11 +72,9 @@ interface SceneProps {
 
 export default function Scene({ onLoaded }: SceneProps = {}) {
   const cameraProps = useMemo(() => ({ position: [0, 2, 0] as [number, number, number], fov: 75, near: 0.1, far: 5000 }), []);
-  const dprProps = useMemo(() => [0.9, 0.9] as [number, number], []);
+  const dprProps = useMemo(() => [0.5, 0.75] as [number, number], []);
   const bgColor = useMemo(() => ["#0b0d12"] as [string], []);
   const groupRotation = useMemo(() => [-Math.PI / 2, 0, 0] as [number, number, number], []);
-  const shadowPosition = useMemo(() => [0, -1.2, 0] as [number, number, number], []);
-  const lightPosition = useMemo(() => [300, 400, 200] as [number, number, number], []);
 
   useEffect(() => {
     // Notify parent when scene is mounted and ready
@@ -92,7 +90,8 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
         className="h-full w-full"
         camera={cameraProps}
         dpr={dprProps}
-        gl={{ antialias: false, powerPreference: "high-performance" }}
+        gl={{ antialias: false, powerPreference: "high-performance", alpha: false, stencil: false, preserveDrawingBuffer: false }}
+        performance={{ min: 0.6 }}
       >
         <color attach="background" args={bgColor} />
         <ambientLight intensity={0.6} />
@@ -109,14 +108,13 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
             <SimpleGrass />
           </Suspense>
 
-        <Environment preset="sunset" environmentIntensity={1.1}/>
+        <Stats />
         <Environment 
           files="/hdri/cloudy-sky-dome_2K_6bdac35f-01c0-441c-a944-b80f08fb0379.exr" 
           background 
           backgroundIntensity={0.40}
-          environmentIntensity={1.3}
+          environmentIntensity={1.0}
         />
-        <Stats className="stats"/>
       </Canvas>
     );
   }
