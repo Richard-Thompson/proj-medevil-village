@@ -124,6 +124,14 @@ export function SimpleGrass() {
   const updateThreshold = 2.0; // Only update when camera moves 2m
   const rotationThreshold = 0.01; // Update when camera rotates (quaternion dot product threshold)
   const lastConfig = useRef<typeof config | null>(null);
+  const scratch = useRef({
+    matrix: new Matrix4(),
+    position: new Vector3(),
+    quaternion: new Quaternion(),
+    scale: new Vector3(),
+    toGrass: new Vector3(),
+    cameraForward: new Vector3()
+  });
 
   // Load grass model (texture is embedded in GLB)
   const grassModel = useGLTF('/models/good-grass-1.2.glb');
@@ -245,9 +253,9 @@ export function SimpleGrass() {
   const config = useControls('Simple Grass LOD', {
     enabled: true,
     nearDistance: { value: 243, min: 0, max: 300, step: 5, label: 'Near Distance (m)' },
-    midDistance: { value: 50, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
-    nearDensity: { value: 3.00, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
-    midDensity: { value: 10.0, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
+    midDistance: { value: 600, min: 50, max: 1000, step: 10, label: 'Mid Distance (m)' },
+    nearDensity: { value: .400, min: 0.01, max: 6.0, step: 0.01, label: 'Near Density (high)' },
+    midDensity: { value: 1.0, min: 0.01, max: 10.0, step: 0.01, label: 'Mid Density (low)' },
     nearSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Near Size' },
     midSize: { value: 1.79, min: 0.01, max: 10, step: 0.01, label: 'Mid Size' },
     runtimeMultiplier: { value: 1, min: 1, max: 200, step: 1, label: 'Runtime Grass Multiplier' },
@@ -322,19 +330,14 @@ export function SimpleGrass() {
     lastCameraQuat.current.copy(camera.quaternion);
     lastConfig.current = { ...config };
     
+    const { matrix, position, quaternion, scale, toGrass, cameraForward } = scratch.current;
+
     // Get camera forward direction for angle-based culling
-    const cameraForward = new Vector3(0, 0, -1);
-    cameraForward.applyQuaternion(camera.quaternion).normalize();
+    cameraForward.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
     
     // Cull only grass 115 degrees or more behind camera
     const cullAngleDegrees = 115;
     const cullDotThreshold = Math.cos(cullAngleDegrees * Math.PI / 180); // cos(115°) ≈ -0.423
-    
-    const matrix = new Matrix4();
-    const position = new Vector3();
-    const quaternion = new Quaternion();
-    const scale = new Vector3();
-    const toGrass = new Vector3();
     
     let culledCount = 0;
     
@@ -344,6 +347,16 @@ export function SimpleGrass() {
     // LOD "mask" distances that follow camera
     const nearDistSq = config.nearDistance * config.nearDistance;
     const midDistSq = config.midDistance * config.midDistance;
+    const invMidDistance = 1.0 / Math.max(0.0001, config.midDistance);
+    const maxDensity = Math.max(config.nearDensity, config.midDensity);
+    const minDensity = Math.min(config.nearDensity, config.midDensity);
+    const nearSize = config.nearSize;
+    const midSize = config.midSize;
+    const runtimeMultiplier = config.runtimeMultiplier;
+    const spawnRadius = config.spawnRadius;
+    const camX = cameraPos.x;
+    const camY = cameraPos.y;
+    const camZ = cameraPos.z;
 
     let nearCount = 0;
     let midCount = 0;
@@ -376,29 +389,27 @@ export function SimpleGrass() {
         const z = cellPositions[i * 3 + 2];
         
         // Angle-based culling: only cull grass 115+ degrees behind camera
-        toGrass.set(x - cameraPos.x, y - cameraPos.y, z - cameraPos.z).normalize();
+        toGrass.set(x - camX, y - camY, z - camZ).normalize();
         const dotProduct = cameraForward.dot(toGrass);
         if (dotProduct < cullDotThreshold) {
           culledCount++;
           continue;
         }
 
-        const dx = x - cameraPos.x;
-        const dz = z - cameraPos.z;
+        const dx = x - camX;
+        const dz = z - camZ;
         const xzDistSq = dx * dx + dz * dz;
         
         if (xzDistSq > nearDistSq) continue;
 
-        const dy = y - cameraPos.y;
+        const dy = y - camY;
         const distSq = xzDistSq + dy * dy;
         const dist = Math.sqrt(distSq);
 
         // Continuous gradient: thick close (max density) -> sparse far (min density)
-        const maxDensity = Math.max(config.nearDensity, config.midDensity);
-        const minDensity = Math.min(config.nearDensity, config.midDensity);
-        
-        const distRatio = Math.min(1.0, dist / config.midDistance);
+        const distRatio = Math.min(1.0, dist * invMidDistance);
         const smoothRatio = distRatio * distRatio * (3.0 - 2.0 * distRatio); // Smoothstep
+        const distanceScale = 1.0 - smoothRatio; // 1 near -> 0 at midDistance
         let densityTarget = maxDensity * (1.0 - smoothRatio) + minDensity * smoothRatio;
         
         // Fade to zero beyond midDistance
@@ -409,7 +420,7 @@ export function SimpleGrass() {
         }
         
         // Runtime multiplier also falls off with distance - amplifies the density gradient
-        const multiplierFactor = config.runtimeMultiplier * (1.0 - smoothRatio);
+        const multiplierFactor = runtimeMultiplier * (1.0 - smoothRatio);
         const effectiveMultiplier = Math.max(1, multiplierFactor);
         
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
@@ -427,7 +438,9 @@ export function SimpleGrass() {
             // Original position from bin file, adjusted to sit flush on mesh
             position.set(x, y - 0.03, z); // Subtract small offset to sit flush
             // Apply smooth fade to scale for AAA-style appearance
-            const fadeScale = config.nearSize * smoothFade;
+            const variationRand = Math.abs(Math.sin(x * 91.7 + z * 23.3) * 43758.5453) % 1;
+            const scaleVariation = 0.7 + variationRand * 0.6; // ±30%
+            const fadeScale = nearSize * smoothFade * distanceScale * scaleVariation;
             scale.set(fadeScale, fadeScale, fadeScale);
             matrix.compose(position, quaternion, scale);
             nearMeshRef.current.setMatrixAt(nearCount++, matrix);
@@ -445,16 +458,18 @@ export function SimpleGrass() {
               const seed = x * 73856093 + z * 19349663 + j * 83492791;
               const rand1 = Math.abs(Math.sin(seed * 0.001) * 43758.5453) % 1;
               const rand2 = Math.abs(Math.sin(seed * 0.002) * 43758.5453) % 1;
-              const rand3 = Math.abs(Math.sin(seed * 0.003) * 43758.5453) % 1;
               
               // Random offset within spawn radius
               const angle = rand1 * Math.PI * 2;
-              const radius = rand2 * config.spawnRadius;
+              const radius = rand2 * spawnRadius;
               const offsetX = Math.cos(angle) * radius;
               const offsetZ = Math.sin(angle) * radius;
               
               position.set(x + offsetX, y - 0.03, z + offsetZ); // Adjust y to sit flush
-              scale.set(fadeScale, fadeScale, fadeScale);
+              const randScale = Math.abs(Math.sin(seed * 0.004) * 43758.5453) % 1;
+              const spawnScaleVariation = 0.7 + randScale * 0.6; // ±30%
+              const spawnScale = nearSize * smoothFade * distanceScale * spawnScaleVariation;
+              scale.set(spawnScale, spawnScale, spawnScale);
               matrix.compose(position, quaternion, scale);
               nearMeshRef.current.setMatrixAt(nearCount++, matrix);
             }
@@ -477,30 +492,28 @@ export function SimpleGrass() {
         const z = cellPositions[i * 3 + 2];
         
         // Angle-based culling: only cull grass 115+ degrees behind camera
-        toGrass.set(x - cameraPos.x, y - cameraPos.y, z - cameraPos.z).normalize();
+        toGrass.set(x - camX, y - camY, z - camZ).normalize();
         const dotProduct = cameraForward.dot(toGrass);
         if (dotProduct < cullDotThreshold) {
           culledCount++;
           continue;
         }
 
-        const dx = x - cameraPos.x;
-        const dz = z - cameraPos.z;
+        const dx = x - camX;
+        const dz = z - camZ;
         const xzDistSq = dx * dx + dz * dz;
         
         // Only mid range (exclude near range - already processed)
         if (xzDistSq <= nearDistSq || xzDistSq > midDistSq) continue;
 
-        const dy = y - cameraPos.y;
+        const dy = y - camY;
         const distSq = xzDistSq + dy * dy;
         const dist = Math.sqrt(distSq);
 
         // Same continuous gradient: max density close, min density far
-        const maxDensity = Math.max(config.nearDensity, config.midDensity);
-        const minDensity = Math.min(config.nearDensity, config.midDensity);
-        
-        const distRatio = Math.min(1.0, dist / config.midDistance);
+        const distRatio = Math.min(1.0, dist * invMidDistance);
         const smoothRatio = distRatio * distRatio * (3.0 - 2.0 * distRatio);
+        const distanceScale = 1.0 - smoothRatio; // 1 near -> 0 at midDistance
         let densityTarget = maxDensity * (1.0 - smoothRatio) + minDensity * smoothRatio;
         
         if (dist > config.midDistance) {
@@ -510,7 +523,7 @@ export function SimpleGrass() {
         }
         
         // Runtime multiplier also falls off with distance in mid range
-        const multiplierFactor = config.runtimeMultiplier * (1.0 - smoothRatio);
+        const multiplierFactor = runtimeMultiplier * (1.0 - smoothRatio);
         const effectiveMultiplier = Math.max(1, multiplierFactor);
         
         const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
@@ -525,7 +538,9 @@ export function SimpleGrass() {
           
           if (smoothFade > 0.01) {
           position.set(x, y - 0.03, z); // Adjust y to sit flush
-          const fadeScale = config.midSize * smoothFade;
+          const variationRand = Math.abs(Math.sin(x * 19.7 + z * 47.3) * 43758.5453) % 1;
+          const scaleVariation = 0.7 + variationRand * 0.6; // ±30%
+          const fadeScale = midSize * smoothFade * distanceScale * scaleVariation;
           scale.set(fadeScale, fadeScale, fadeScale);
           matrix.compose(position, quaternion, scale);
           midMeshRef.current.setMatrixAt(midCount++, matrix);
@@ -543,12 +558,15 @@ export function SimpleGrass() {
             const rand2 = Math.abs(Math.sin(seed * 0.002) * 43758.5453) % 1;
             
             const angle = rand1 * Math.PI * 2;
-            const radius = rand2 * config.spawnRadius;
+            const radius = rand2 * spawnRadius;
             const offsetX = Math.cos(angle) * radius;
             const offsetZ = Math.sin(angle) * radius;
             
               position.set(x + offsetX, y - 0.03, z + offsetZ); // Adjust y to sit flush
-            scale.set(fadeScale, fadeScale, fadeScale);
+            const randScale = Math.abs(Math.sin(seed * 0.006) * 43758.5453) % 1;
+            const spawnScaleVariation = 0.7 + randScale * 0.6; // ±30%
+            const spawnScale = midSize * smoothFade * distanceScale * spawnScaleVariation;
+            scale.set(spawnScale, spawnScale, spawnScale);
             matrix.compose(position, quaternion, scale);
             midMeshRef.current.setMatrixAt(midCount++, matrix);
             }

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { ThreeElements } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 
@@ -35,6 +36,75 @@ function readMagic(dv: DataView, o = 0) {
     String.fromCharCode(dv.getUint8(o + 2)) +
     String.fromCharCode(dv.getUint8(o + 3))
   );
+}
+
+type GrassPbrMaterial = THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial;
+
+function findFirstPbrMaterial(root: THREE.Object3D | null | undefined): GrassPbrMaterial | null {
+  if (!root) return null;
+
+  let found: GrassPbrMaterial | null = null;
+  root.traverse((obj) => {
+    if (found) return;
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.material) return;
+    const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if ((mat as any)?.isMeshStandardMaterial || (mat as any)?.isMeshPhysicalMaterial) {
+      found = mat as GrassPbrMaterial;
+    }
+  });
+
+  return found;
+}
+
+function applyPrincipledParams(target: GrassPbrMaterial, source: GrassPbrMaterial) {
+  const t = target as any;
+  const s = source as any;
+
+  const scalarKeys = [
+    "roughness",
+    "metalness",
+    "envMapIntensity",
+    "emissiveIntensity",
+    "aoMapIntensity",
+    "normalScale",
+    "clearcoat",
+    "clearcoatRoughness",
+    "clearcoatNormalScale",
+    "ior",
+    "transmission",
+    "thickness",
+    "attenuationDistance",
+    "specularIntensity",
+    "sheen",
+    "sheenRoughness",
+    "iridescence",
+    "iridescenceIOR",
+    "iridescenceThicknessRange",
+  ];
+
+  for (const key of scalarKeys) {
+    if (s[key] !== undefined && s[key] !== null) {
+      if (key === "normalScale" || key === "clearcoatNormalScale") {
+        if (t[key] && s[key]) t[key].copy(s[key]);
+      } else if (key === "iridescenceThicknessRange") {
+        if (Array.isArray(s[key])) t[key] = [...s[key]];
+      } else {
+        t[key] = s[key];
+      }
+    }
+  }
+
+  if (t.emissive && s.emissive) t.emissive.copy(s.emissive);
+  if (t.sheenColor && s.sheenColor) t.sheenColor.copy(s.sheenColor);
+  if (t.specularColor && s.specularColor) t.specularColor.copy(s.specularColor);
+  if (t.attenuationColor && s.attenuationColor) t.attenuationColor.copy(s.attenuationColor);
+
+  if (s.normalMap) t.normalMap = s.normalMap;
+  if (s.roughnessMap) t.roughnessMap = s.roughnessMap;
+  if (s.metalnessMap) t.metalnessMap = s.metalnessMap;
+  if (s.aoMap) t.aoMap = s.aoMap;
+  if (s.emissiveMap) t.emissiveMap = s.emissiveMap;
 }
 
 function parseITRI(ab: ArrayBuffer): ITRIData {
@@ -121,6 +191,9 @@ export async function fetchAndParseITRI(url: string): Promise<ITRIData> {
 type InstancedTrianglesProps = Omit<ThreeElements["mesh"], "args"> & {
   url: string;
   textureUrl?: string;
+  grassMaterialUrl?: string;
+  useGrassPbrParams?: boolean;
+  maxMidDistance?: number;
   parent?: THREE.Object3D | null;
   maxInstances?: number;
   grassGridUrl?: string; // Optional grass grid for accurate black gradient
@@ -129,6 +202,9 @@ type InstancedTrianglesProps = Omit<ThreeElements["mesh"], "args"> & {
 export function InstancedTriangles({
   url,
   textureUrl = "/baked-textures/output.webp",
+  grassMaterialUrl = "/models/good-grass-1.2.glb",
+  useGrassPbrParams = true,
+  maxMidDistance = 50,
   parent = null,
   maxInstances = 0,
   grassGridUrl = "/grass-grid.bin",
@@ -141,6 +217,11 @@ export function InstancedTriangles({
   const [grassTexture, setGrassTexture] = useState<THREE.DataTexture | null>(null);
   const [grassBounds, setGrassBounds] = useState<{ minX: number; maxX: number; minZ: number; maxZ: number } | null>(null);
   const [grassTexSize, setGrassTexSize] = useState<number>(8192);
+  const grassModel = useGLTF(grassMaterialUrl) as any;
+  const grassPbrMaterial = useMemo(
+    () => (useGrassPbrParams ? findFirstPbrMaterial(grassModel?.scene) : null),
+    [grassModel, useGrassPbrParams]
+  );
 
   useEffect(() => {
     console.log("Loading texture:", textureUrl);
@@ -269,13 +350,22 @@ export function InstancedTriangles({
     if (!albedoMap) return null;
     if (!grassTexture) return null; // Wait for grass texture to be loaded
 
-    const mat = new THREE.MeshStandardMaterial({
+    const baseParams = {
       map: albedoMap,
       side: THREE.DoubleSide,
       flatShading: false,
-      roughness: 1.0,
-      metalness: 0.0,
-    });
+    };
+
+    const mat =  new THREE.MeshStandardMaterial({
+          ...baseParams,
+          roughness: 1.0,
+          metalness: 0.0,
+          envMapIntensity: 0.0,
+        });
+
+    if (grassPbrMaterial) {
+      applyPrincipledParams(mat, grassPbrMaterial);
+    }
 
     mat.onBeforeCompile = (shader) => {
       console.log("onBeforeCompile called, hasUvs:", !!data.uvs);
@@ -291,6 +381,7 @@ export function InstancedTriangles({
       shader.uniforms.uGrassMax = { value: grassBounds ? new THREE.Vector2(grassBounds.maxX, grassBounds.maxZ) : new THREE.Vector2(5000, 5000) };
       shader.uniforms.uGrassTexSize = { value: grassTexSize };
       shader.uniforms.uDebugGrass = { value: 1.0 }; // 1.0 = show red debug, 0.0 = normal
+      shader.uniforms.uMaxMidDistance = { value: maxMidDistance };
 
       // Inject custom attributes at the top of vertex shader
       shader.vertexShader = shader.vertexShader.replace(
@@ -358,6 +449,7 @@ export function InstancedTriangles({
         uniform vec2 uGrassMax;
         uniform float uDebugGrass;
         uniform float uGrassTexSize;
+        uniform float uMaxMidDistance;
         varying vec3 vWorldPosition;`
       );
       
@@ -366,10 +458,18 @@ export function InstancedTriangles({
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <map_fragment>',
         `#include <map_fragment>
+        float farBlack = 0.0;
         
         // Detect green colors and convert to dead grey FIRST
         float greenAmount = diffuseColor.g;
         bool isGreen = greenAmount > 0.1; // Threshold for green detection
+
+        float distToCamera = distance(vWorldPosition, uCameraPosition);
+        bool isBeyondMid = distToCamera >= uMaxMidDistance;
+        if (isGreen && isBeyondMid) {
+          farBlack = 1.0;
+          diffuseColor.rgb = vec3(0.0);
+        } else {
         
         // if (isGreen) {
         //   // Calculate luminance to preserve brightness
@@ -412,24 +512,28 @@ export function InstancedTriangles({
           if (uDebugGrass > 0.5) {
             // Boost density for more solid black while keeping soft gradient
             float boostedDensity = min(grassDensity * 100.8, 1.0);
-            float intensity = pow(boostedDensity, 0.9); // Keep smooth gradient
-            diffuseColor.rgb = mix(vec3(0.05), vec3(0.01, 0.01, 0.01), smoothstep(0.0, 1.0, intensity));
+            float intensity = pow(boostedDensity, 2.0); // Keep smooth gradient
+            diffuseColor.rgb = mix(isGreen ? vec3(0.0) :vec3(0.05), vec3(0.00, 0.00, 0.00), smoothstep(0.0, 0.05, intensity));
           } else {
-            // Soft black blob with very soft gradient at grass boundaries
-            float distFromCamera = length(vWorldPosition - uCameraPosition);
+            // Darken grass areas across entire base mesh, not just near camera
             
-            // Very soft radial gradient from camera
-            float radialFade = pow(distFromCamera / uGradientRadius, 2.5);
-            radialFade = clamp(radialFade, 0.0, 1.0);
-            
-            // Very soft grass boundary fade
+            // Soft grass boundary fade
             float grassFade = pow(grassDensity, 0.3);
             
-            // Combine both fades for soft blob effect
-            float darknessFactor = grassFade * (1.0 - radialFade);
+            // Apply darkening uniformly across all grass areas
+            float darknessFactor = grassFade * 0.95; // 95% darkness where grass exists
             
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0), darknessFactor);
           }
+        }
+        }`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <output_fragment>',
+        `#include <output_fragment>
+        if (farBlack > 0.5) {
+          gl_FragColor = vec4(0.0, 0.0, 0.0, gl_FragColor.a);
         }`
       );
 
@@ -573,7 +677,8 @@ export function InstancedTriangles({
             attributes: Object.keys(mesh.geometry.attributes)
           });
         }
-      }}
+        }
+      }
       args={[geom, material, instanceCount]}
       frustumCulled={false}
       renderOrder={999}

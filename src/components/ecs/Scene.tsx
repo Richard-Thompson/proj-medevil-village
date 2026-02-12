@@ -96,7 +96,7 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
       >
         <color attach="background" args={bgColor} />
         <ambientLight intensity={0.6} />
-        <directionalLight position={lightPosition} intensity={0.05} />
+        {/* <directionalLight position={lightPosition} intensity={0.05} /> */}
         <CameraPositioner />
         <CameraControlSystem />
         <PointerLockControls />
