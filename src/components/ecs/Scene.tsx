@@ -96,7 +96,7 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
       >
         <color attach="background" args={bgColor} />
         <ambientLight intensity={0.6} />
-        <directionalLight position={lightPosition} intensity={0.5} />
+        <directionalLight position={lightPosition} intensity={0.05} />
         <CameraPositioner />
         <CameraControlSystem />
         <PointerLockControls />
@@ -109,8 +109,14 @@ export default function Scene({ onLoaded }: SceneProps = {}) {
             <SimpleGrass />
           </Suspense>
 
-        <Environment preset="sunset" />
-        <Stats className="stats" />
+        <Environment preset="sunset" environmentIntensity={1.1}/>
+        <Environment 
+          files="/hdri/cloudy-sky-dome_2K_6bdac35f-01c0-441c-a944-b80f08fb0379.exr" 
+          background 
+          backgroundIntensity={0.40}
+          environmentIntensity={1.3}
+        />
+        <Stats className="stats"/>
       </Canvas>
     );
   }

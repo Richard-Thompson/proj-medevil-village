@@ -273,7 +273,7 @@ export function InstancedTriangles({
       map: albedoMap,
       side: THREE.DoubleSide,
       flatShading: false,
-      roughness: 0.8,
+      roughness: 1.0,
       metalness: 0.0,
     });
 
@@ -371,13 +371,13 @@ export function InstancedTriangles({
         float greenAmount = diffuseColor.g;
         bool isGreen = greenAmount > 0.1; // Threshold for green detection
         
-        if (isGreen) {
-          // Calculate luminance to preserve brightness
-          float luminance = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
-          // Dead grass color - greyish brown
-          vec3 deadGrass = vec3(0.4, 0.38, 0.32) * luminance * 1.5;
-          diffuseColor.rgb = deadGrass;
-        }
+        // if (isGreen) {
+        //   // Calculate luminance to preserve brightness
+        //   float luminance = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+        //   // Dead grass color - greyish brown
+        //   vec3 deadGrass = vec3(0.4, 0.38, 0.32) * luminance * 1.5;
+        //   diffuseColor.rgb = deadGrass;
+        // }
         
         // Sample grass density texture with blur for smooth edges
         vec2 grassUV = (vWorldPosition.xz - uGrassMin) / (uGrassMax - uGrassMin);
@@ -411,9 +411,9 @@ export function InstancedTriangles({
           // Debug mode: show black gradient with soft falloff
           if (uDebugGrass > 0.5) {
             // Boost density for more solid black while keeping soft gradient
-            float boostedDensity = min(grassDensity * 10.8, 1.0);
-            float intensity = pow(boostedDensity, 0.4); // Keep smooth gradient
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.01, 0.01, 0.01), smoothstep(0.0, 1.0, intensity));
+            float boostedDensity = min(grassDensity * 100.8, 1.0);
+            float intensity = pow(boostedDensity, 0.9); // Keep smooth gradient
+            diffuseColor.rgb = mix(vec3(0.05), vec3(0.01, 0.01, 0.01), smoothstep(0.0, 1.0, intensity));
           } else {
             // Soft black blob with very soft gradient at grass boundaries
             float distFromCamera = length(vWorldPosition - uCameraPosition);

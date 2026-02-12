@@ -126,7 +126,7 @@ export function SimpleGrass() {
   const lastConfig = useRef<typeof config | null>(null);
 
   // Load grass model (texture is embedded in GLB)
-  const grassModel = useGLTF('/models/good-grass-1.1.glb');
+  const grassModel = useGLTF('/models/good-grass-1.2.glb');
   
   // Get grass geometry and material from model
   const { grassGeometry, grassMaterial } = useMemo(() => {
